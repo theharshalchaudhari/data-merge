@@ -8,12 +8,15 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "admin:create": "tsx src/scripts/create-admin.ts"
   },
   "dependencies": {
     "@data-manage/types": "workspace:*",
     "@fastify/cookie": "catalog:",
     "@fastify/cors": "catalog:",
+    "@fastify/multipart": "catalog:",
+    "archiver": "catalog:",
     "bcrypt": "catalog:",
     "dotenv": "catalog:",
     "fastify": "catalog:",
@@ -23,6 +26,7 @@
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
+    "@types/archiver": "catalog:",
     "@types/bcrypt": "catalog:",
     "@types/node": "catalog:",
     "@types/pg": "catalog:",

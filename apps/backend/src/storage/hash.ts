@@ -6,7 +6,7 @@ import {
   createReadStream
 } from "node:fs";
 
-export function sha256File(
+export async function sha256File(
   filePath: string
 ): Promise<string> {
   return new Promise(
@@ -20,15 +20,15 @@ export function sha256File(
         );
 
       stream.on(
-        "error",
-        reject
-      );
-
-      stream.on(
         "data",
         (chunk) => {
           hash.update(chunk);
         }
+      );
+
+      stream.on(
+        "error",
+        reject
       );
 
       stream.on(

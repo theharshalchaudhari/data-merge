@@ -10,8 +10,8 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Utoolity",
-  description: "Your utility application",
+  title: "Data-Merge",
+  description: "data management tool for merging and annotating datasets",
 };
 
 export default function RootLayout({

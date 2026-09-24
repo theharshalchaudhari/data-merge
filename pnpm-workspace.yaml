@@ -39,7 +39,7 @@ catalog:
   "@types/react-dom": 19.2.3
   "@types/bcrypt": 6.0.0
   "@types/pg": 8.15.5
-  "@types/archiver": 7.0.1
+  "@types/archiver": 8.0.0
 
   postcss: 8.5.23
   turbo: 2.9.16

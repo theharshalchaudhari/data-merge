@@ -25,7 +25,9 @@
     "clsx": "catalog:",
     "cn": "catalog:",
     "lucide-react": "catalog:",
+    "next-themes": "^0.4.6",
     "radix-ui": "catalog:",
+    "sonner": "^2.0.8",
     "tailwind-merge": "catalog:"
   },
   "peerDependencies": {

@@ -10,11 +10,12 @@ export interface User {
   username: string;
   email: string;
   role: UserRole;
-  createdAt: string;
-  updatedAt: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
-export interface AuthUser extends User {}
+export interface AuthUser
+  extends User {}
 
 export interface LoginRequest {
   username: string;
@@ -26,12 +27,4 @@ export interface RegisterRequest {
   username: string;
   email: string;
   password: string;
-}
-
-export interface SessionUser {
-  id: string;
-  name: string;
-  username: string;
-  email: string;
-  role: UserRole;
 }

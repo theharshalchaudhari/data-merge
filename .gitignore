@@ -1,45 +1,64 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # Dependencies
-node_modules
+node_modules/
 .pnp
 .pnp.js
 
-# Local env files
-
-.env.development.local
-.env.test.local
-.env.production.local
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
 
 # Testing
-coverage
+coverage/
 
 # Turbo
-.turbo
+.turbo/
 
 # Vercel
-.vercel
+.vercel/
 
-# Build Outputs
+# Build outputs
 .next/
 out/
-build
-dist
+build/
+dist/
 apps/frontend/.next/
 apps/frontend/out/
-apps/frontend/build
-apps/frontend/dist
-apps/backend/dist
-apps/backend/build
+apps/frontend/build/
+apps/frontend/dist/
+apps/backend/dist/
+apps/backend/build/
 
-# Debug
+# Runtime data
+data/raw/
+data/metadata/
+
+# Runtime database / local application data
+data/**/*.db
+data/**/*.sqlite
+data/**/*.sqlite3
+
+# Debug logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+*.log
 
-# Misc
+# Logs
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.parcel-cache/
+
+# OS
 .DS_Store
-*.pem
+Thumbs.db
+Desktop.ini
 
 # IDE
 .vscode/
@@ -48,47 +67,26 @@ yarn-error.log*
 *.swo
 *~
 
-# OS
-Thumbs.db
-Desktop.ini
+# Certificates / keys
+*.pem
 
-# pnpm
-pnpm-lock.yaml
-
-# TypeScript cache
+# TypeScript
 *.tsbuildinfo
 
-# Temporary files
-*.tmp
-*.temp
-.cache/
-
-# Environment files (keep .env.example if you have it)
-.env*
-!.env.example
-
-# Logs
-logs
-*.log
-
-# Package manager cache
-.cache
-.parcel-cache
-
 # Storybook
-storybook-static
+storybook-static/
 
 # Next.js
-.next
-out
-build
-dist
-.vercel
+.next/
+out/
+.vercel/
 
-# Don't ignore GitHub workflows
+# GitHub workflows
+!.github/
+!.github/workflows/
 !.github/workflows/*.yml
 !.github/workflows/*.yaml
 
-# Don't ignore essential config files
+# Essential project configuration
 !apps/frontend/.gitignore
 !apps/backend/.gitignore

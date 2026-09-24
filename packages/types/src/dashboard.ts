@@ -1,34 +1,27 @@
 export interface DashboardStats {
   clients: number;
+  views: number;
   images: number;
-  labels: number;
   annotations: number;
+  users: number;
 }
 
 export interface ClientStatistics {
-  clientId: string;
-  clientName: string;
+  client_id: string;
+  client_name: string;
   images: number;
   annotations: number;
 }
 
 export interface ViewStatistics {
-  viewId: string;
-  viewName: string;
+  view_id: string;
+  view_name: string;
   images: number;
   annotations: number;
 }
 
-export interface ClassStatistics {
-  classId: number;
-  className: string;
-  count: number;
-}
-
 export interface DashboardResponse {
   stats: DashboardStats;
-
-  byClient: ClientStatistics[];
-  byView: ViewStatistics[];
-  byClass: ClassStatistics[];
+  clients: ClientStatistics[];
+  views: ViewStatistics[];
 }

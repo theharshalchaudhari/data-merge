@@ -3,22 +3,18 @@ import {
 } from "node:fs/promises";
 
 import {
-  getMetadataRoot,
-  getRawRoot
+  getRawRoot,
+  getMetadataRoot
 } from "./paths.js";
 
 export async function initializeStorage(): Promise<void> {
   await mkdir(
     getRawRoot(),
-    {
-      recursive: true
-    }
+    { recursive: true }
   );
 
   await mkdir(
     getMetadataRoot(),
-    {
-      recursive: true
-    }
+    { recursive: true }
   );
 }

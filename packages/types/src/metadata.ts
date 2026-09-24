@@ -1,57 +1,55 @@
 import type {
   Annotation,
   AnnotationType
-} from "./annotation";
+} from "./annotation.js";
 
 export interface MetadataRecord {
   id: string;
 
-  clientId: string;
-  clientName: string;
+  client_id: string;
 
-  viewId: string;
-  viewName: string;
+  client_name: string;
+
+  view_id: string;
+
+  view_name: string;
 
   name: string;
 
-  annotationType: AnnotationType;
+  annotation_type:
+    AnnotationType;
 
-  annotations: Annotation[];
+  annotations:
+    Annotation[];
 
-  imageHash: string;
+  image_hash: string;
 
-  rootFolders: string[];
-  originalRootFolders: string[];
+  root_folders:
+    string[];
 
-  sourceLocations: string[];
+  original_root_folders:
+    string[];
 
-  description: string | null;
+  source_locations:
+    string[];
 
-  createdAt: string;
-  updatedAt: string;
-}
+  description:
+    string | null;
 
-export interface MetadataListQuery {
-  page?: number;
-  limit?: number;
+  created_at: string;
 
-  search?: string;
-
-  clientId?: string;
-  viewId?: string;
-
-  annotationType?: AnnotationType;
-
-  rootFolder?: string;
+  updated_at: string;
 }
 
 export interface MetadataListResponse {
-  items: MetadataRecord[];
+  items:
+    MetadataRecord[];
 
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
+  page: number;
+
+  limit: number;
+
+  total: number;
+
+  totalPages: number;
 }

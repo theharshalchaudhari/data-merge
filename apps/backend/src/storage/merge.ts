@@ -3,53 +3,33 @@ import type {
   AnnotationType
 } from "@data-manage/types";
 
-function annotationKey(
-  annotation: Annotation
-): string {
-  return JSON.stringify(
-    annotation
-  );
-}
-
-export function mergeAnnotations(
-  existing: Annotation[],
-  incoming: Annotation[]
+export function dedupeAnnotations(
+  annotations: Annotation[]
 ): Annotation[] {
-  const annotations =
-    new Map<
-      string,
-      Annotation
-    >();
+  const seen =
+    new Set<string>();
 
-  for (
-    const annotation of existing
-  ) {
-    annotations.set(
-      annotationKey(annotation),
-      annotation
-    );
+  const result: Annotation[] = [];
+
+  for (const annotation of annotations) {
+    const key =
+      JSON.stringify(annotation);
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(annotation);
   }
 
-  for (
-    const annotation of incoming
-  ) {
-    annotations.set(
-      annotationKey(annotation),
-      annotation
-    );
-  }
-
-  return Array.from(
-    annotations.values()
-  );
+  return result;
 }
 
 export function inferAnnotationType(
   annotations: Annotation[]
 ): AnnotationType {
-  if (
-    annotations.length === 0
-  ) {
+  if (!annotations.length) {
     return "bbox";
   }
 
@@ -62,15 +42,15 @@ export function inferAnnotationType(
     );
 
   if (
-    formats.has("polygon")
-  ) {
-    return "polygon";
-  }
-
-  if (
     formats.has("segmentation")
   ) {
     return "segmentation";
+  }
+
+  if (
+    formats.has("polygon")
+  ) {
+    return "polygon";
   }
 
   return "bbox";

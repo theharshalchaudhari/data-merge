@@ -1,21 +1,34 @@
 import "dotenv/config";
+
 import { z } from "zod";
 
 const envSchema = z.object({
   NODE_ENV: z
-    .enum(["development", "test", "production"])
+    .enum([
+      "development",
+      "test",
+      "production",
+    ])
     .default("development"),
 
-  BACKEND_PORT: z.coerce.number().int().positive().default(4000),
+  BACKEND_PORT: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(65535)
+    .default(4000),
 
-  DATABASE_URL: z.string().min(1),
+  DATABASE_URL: z
+    .string()
+    .min(1),
 
   DATA_ROOT: z
     .string()
-    .min(1)
-    .default("/server/harshal/root-folder/data"),
+    .min(1),
 
-  SESSION_SECRET: z.string().min(32),
+  SESSION_SECRET: z
+    .string()
+    .min(32),
 
   SESSION_COOKIE_NAME: z
     .string()
@@ -33,4 +46,20 @@ const envSchema = z.object({
     .default("http://localhost:3000"),
 });
 
-export const env = envSchema.parse(process.env);
+const result = envSchema.safeParse(
+  process.env,
+);
+
+if (!result.success) {
+  console.error(
+    "Invalid environment configuration:",
+  );
+
+  console.error(
+    result.error.flatten().fieldErrors,
+  );
+
+  process.exit(1);
+}
+
+export const env = result.data;

@@ -11,6 +11,7 @@
     "check-types": "next typegen && tsc --noEmit"
   },
   "dependencies": {
+    "@data-manage/types": "workspace:*",
     "@repo/theme": "workspace:*",
     "@repo/ui": "workspace:*",
     "class-variance-authority": "catalog:",

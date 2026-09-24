@@ -1,52 +1,105 @@
 import Fastify from "fastify";
-
-import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
+import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
+
+import { env } from "./config/env.js";
 
 import {
-  env
-} from "./config/env.js";
+  registerAuthRoutes,
+} from "./modules/auth/routes.js";
 
-export function createApp() {
-  const app =
-    Fastify({
-      logger: {
-        level:
-          env.NODE_ENV ===
-          "production"
-            ? "info"
-            : "debug"
-      }
-    });
+import {
+  registerClientRoutes,
+} from "./modules/clients/routes.js";
 
-  app.register(
-    cors,
-    {
-      origin:
-        env.NEXT_PUBLIC_API_URL,
-      credentials: true
-    }
-  );
+import {
+  registerDashboardRoutes,
+} from "./modules/dashboard/routes.js";
 
-  app.register(
-    cookie,
-    {
-      hook: "onRequest"
-    }
-  );
+import {
+  registerDownloadRoutes,
+} from "./modules/download/routes.js";
+
+import {
+  registerMetadataRoutes,
+} from "./modules/metadata/routes.js";
+
+import {
+  registerUploadRoutes,
+} from "./modules/upload/routes.js";
+
+import {
+  registerUserRoutes,
+} from "./modules/users/routes.js";
+
+import {
+  registerViewRoutes,
+} from "./modules/views/routes.js";
+
+export async function createApp() {
+  const app = Fastify({
+    logger: true,
+
+    bodyLimit:
+      env.MAX_UPLOAD_SIZE_MB *
+      1024 *
+      1024,
+  });
+
+  await app.register(cors, {
+    origin: env.NEXT_PUBLIC_API_URL,
+    credentials: true,
+  });
+
+  await app.register(cookie, {
+    secret: env.SESSION_SECRET,
+  });
+
+  await app.register(multipart, {
+    limits: {
+      fileSize:
+        env.MAX_UPLOAD_SIZE_MB *
+        1024 *
+        1024,
+
+      /*
+       * Dataset uploads can contain many files.
+       */
+      files: 10000,
+
+      parts: 20000,
+
+      fields: 10,
+
+      fieldSize: 1024 * 1024,
+    },
+  });
 
   app.get(
     "/health",
-    async () => {
-      return {
-        status: "ok",
-        service:
-          "data-manage-backend",
-        timestamp:
-          new Date().toISOString()
-      };
-    }
+    async () => ({
+      status: "ok",
+      service: "data-manage-backend",
+      timestamp: new Date().toISOString(),
+    }),
   );
+
+  await registerAuthRoutes(app);
+
+  await registerClientRoutes(app);
+
+  await registerViewRoutes(app);
+
+  await registerUserRoutes(app);
+
+  await registerMetadataRoutes(app);
+
+  await registerDashboardRoutes(app);
+
+  await registerUploadRoutes(app);
+
+  await registerDownloadRoutes(app);
 
   return app;
 }

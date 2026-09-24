@@ -5,23 +5,32 @@ export type AnnotationType =
 
 export interface BoundingBoxGeometry {
   format: "yolo_bbox";
+
   values: [
-    classId: number,
-    xCenter: number,
-    yCenter: number,
-    width: number,
-    height: number
+    number,
+    number,
+    number,
+    number,
+    number
   ];
 }
 
 export interface PolygonGeometry {
   format: "polygon";
-  points: Array<[number, number]>;
+
+  points:
+    Array<
+      [number, number]
+    >;
 }
 
 export interface SegmentationGeometry {
   format: "segmentation";
-  points: Array<[number, number]>;
+
+  points:
+    Array<
+      [number, number]
+    >;
 }
 
 export type AnnotationGeometry =
@@ -31,6 +40,9 @@ export type AnnotationGeometry =
 
 export interface Annotation {
   classId: number;
+
   className: string;
-  geometry: AnnotationGeometry;
+
+  geometry:
+    AnnotationGeometry;
 }

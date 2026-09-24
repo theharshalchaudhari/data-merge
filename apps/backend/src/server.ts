@@ -3,6 +3,10 @@ import {
 } from "./app.js";
 
 import {
+  env
+} from "./config/env.js";
+
+import {
   checkDatabaseConnection,
   closeDatabase
 } from "./db/client.js";
@@ -11,55 +15,43 @@ import {
   initializeStorage
 } from "./storage/init.js";
 
-import {
-  env
-} from "./config/env.js";
+async function start() {
+  await initializeStorage();
 
-const app =
-  createApp();
+  await checkDatabaseConnection();
 
-async function start(): Promise<void> {
-  try {
-    await initializeStorage();
+  const app =
+    await createApp();
 
-    await checkDatabaseConnection();
+  await app.listen({
+    host: "0.0.0.0",
+    port:
+      env.BACKEND_PORT
+  });
 
-    await app.listen({
-      host: "0.0.0.0",
-      port: env.BACKEND_PORT
-    });
+  async function shutdown() {
+    await app.close();
+    await closeDatabase();
+    process.exit(0);
+  }
 
-    app.log.info(
-      `Backend running on port ${env.BACKEND_PORT}`
-    );
-  } catch (error) {
-    app.log.error(
-      error,
-      "Failed to start backend"
+  process.on(
+    "SIGINT",
+    shutdown
+  );
+
+  process.on(
+    "SIGTERM",
+    shutdown
+  );
+}
+
+start().catch(
+  (error) => {
+    console.error(
+      error
     );
 
     process.exit(1);
   }
-}
-
-async function shutdown(): Promise<void> {
-  try {
-    await app.close();
-
-    await closeDatabase();
-  } finally {
-    process.exit(0);
-  }
-}
-
-process.once(
-  "SIGINT",
-  shutdown
 );
-
-process.once(
-  "SIGTERM",
-  shutdown
-);
-
-await start();
