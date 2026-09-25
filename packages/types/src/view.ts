@@ -1,5 +1,6 @@
-export interface Client {
+export interface View {
   id: string;
+  clientId: string;
   name: string;
   description: string | null;
   created_at?: string;

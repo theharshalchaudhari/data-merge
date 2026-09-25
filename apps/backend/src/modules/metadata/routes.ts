@@ -1,132 +1,114 @@
 import type {
-  FastifyInstance
+  FastifyInstance,
 } from "fastify";
-
 import { z } from "zod";
-
+import { db } from "../../db/client.js";
 import {
-  db
-} from "../../db/client.js";
-
-import {
-  requireRole
+  requireRole,
 } from "../auth/guard.js";
 
-const querySchema =
-  z.object({
-    clientId:
-      z.string()
-        .uuid()
-        .optional(),
+const querySchema = z.object({
+  clientId: z
+    .string()
+    .uuid()
+    .optional(),
 
-    viewId:
-      z.string()
-        .uuid()
-        .optional(),
+  viewId: z
+    .string()
+    .uuid()
+    .optional(),
 
-    annotationType:
-      z.enum([
-        "bbox",
-        "polygon",
-        "segmentation"
-      ]).optional(),
+  annotationType: z
+    .enum([
+      "bbox",
+      "background_images",
+    ])
+    .optional(),
 
-    search:
-      z.string()
-        .optional(),
+  search: z
+    .string()
+    .optional(),
 
-    page:
-      z.coerce
-        .number()
-        .int()
-        .positive()
-        .default(1),
+  page: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1),
 
-    limit:
-      z.coerce
-        .number()
-        .int()
-        .positive()
-        .max(100)
-        .default(50)
-  });
+  limit: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(100)
+    .default(50),
+});
 
 export async function registerMetadataRoutes(
-  app: FastifyInstance
+  app: FastifyInstance,
 ) {
   app.get(
     "/api/metadata",
     {
-      preHandler:
-        requireRole(
-          "admin",
-          "editor",
-          "viewer"
-        )
+      preHandler: requireRole(
+        "admin",
+        "editor",
+        "viewer",
+      ),
     },
-    async (
-      request
-    ) => {
+    async (request) => {
       const query =
         querySchema.parse(
-          request.query
+          request.query,
         );
 
-      const conditions: string[] =
-        [];
-
-      const values: unknown[] =
-        [];
+      const conditions: string[] = [];
+      const values: unknown[] = [];
 
       function add(
         condition: string,
-        value: unknown
+        value: unknown,
       ) {
         values.push(value);
 
         conditions.push(
           condition.replace(
             "?",
-            `$${values.length}`
-          )
+            `$${values.length}`,
+          ),
         );
       }
 
       if (query.clientId) {
         add(
           "m.client_id = ?",
-          query.clientId
+          query.clientId,
         );
       }
 
       if (query.viewId) {
         add(
           "m.view_id = ?",
-          query.viewId
+          query.viewId,
         );
       }
 
-      if (
-        query.annotationType
-      ) {
+      if (query.annotationType) {
         add(
           "m.annotation_type = ?",
-          query.annotationType
+          query.annotationType,
         );
       }
 
       if (query.search) {
         add(
           "m.name ILIKE ?",
-          `%${query.search}%`
+          `%${query.search}%`,
         );
       }
 
       const where =
-        conditions.length
-          ? `WHERE ${conditions.join(
-              " AND "
-            )}`
+        conditions.length > 0
+          ? `WHERE ${conditions.join(" AND ")}`
           : "";
 
       const count =
@@ -136,7 +118,7 @@ export async function registerMetadataRoutes(
           FROM metadata m
           ${where}
           `,
-          values
+          values,
         );
 
       const total =
@@ -162,9 +144,7 @@ export async function registerMetadataRoutes(
             m.root_folders,
             m.original_root_folders,
             m.source_locations,
-            m.description,
-            m.created_at,
-            m.updated_at
+            m.description
           FROM metadata m
           INNER JOIN clients c
             ON c.id = m.client_id
@@ -172,7 +152,7 @@ export async function registerMetadataRoutes(
             ON v.id = m.view_id
           ${where}
           ORDER BY
-            m.updated_at DESC
+            m.name ASC
           LIMIT
             $${values.length + 1}
           OFFSET
@@ -181,24 +161,31 @@ export async function registerMetadataRoutes(
           [
             ...values,
             query.limit,
-            offset
-          ]
+            offset,
+          ],
+        );
+
+      const classResult =
+        await db.query(
+          `
+          SELECT
+            class_id,
+            class_name
+          FROM classes
+          ORDER BY class_id ASC
+          `,
         );
 
       return {
-        items:
-          result.rows,
-        page:
-          query.page,
-        limit:
-          query.limit,
+        items: result.rows,
+        classes: classResult.rows,
+        page: query.page,
+        limit: query.limit,
         total,
-        totalPages:
-          Math.ceil(
-            total /
-              query.limit
-          )
+        totalPages: Math.ceil(
+          total / query.limit,
+        ),
       };
-    }
+    },
   );
 }

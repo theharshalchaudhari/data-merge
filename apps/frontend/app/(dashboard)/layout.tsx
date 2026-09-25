@@ -1,65 +1,59 @@
 "use client";
 
 import Link from "next/link";
-
-import {
-  usePathname,
-  useRouter
-} from "next/navigation";
-
-import {
-  useAuth
-} from "../../hooks/use-auth";
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useAuth } from "../../hooks/use-auth";
 
 const links = [
   {
     href: "/dashboard",
-    label: "Dashboard"
+    label: "Dashboard",
   },
   {
     href: "/clients",
-    label: "Clients"
+    label: "Clients",
   },
   {
     href: "/views",
-    label: "Views"
+    label: "Views",
   },
   {
     href: "/metadata",
-    label: "Metadata"
+    label: "Metadata",
   },
   {
     href: "/upload",
-    label: "Upload"
+    label: "Upload",
   },
   {
     href: "/users",
-    label: "Users"
-  }
+    label: "Users",
+  },
+  {
+    href: "/download",
+    label: "Download",
+  },
 ];
 
 export default function DashboardLayout({
-  children
+  children,
 }: {
-  children:
-    React.ReactNode;
+  children: React.ReactNode;
 }) {
-  const pathname =
-    usePathname();
+  const pathname = usePathname();
+  const router = useRouter();
+  const { user, loading, logout } = useAuth();
 
-  const router =
-    useRouter();
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace(
+        `/login?next=${encodeURIComponent(pathname)}`,
+      );
+    }
+  }, [loading, user, router, pathname]);
 
-  const {
-    user,
-    loading,
-    logout
-  } =
-    useAuth();
-
-  if (
-    loading
-  ) {
+  if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         Loading...
@@ -68,10 +62,6 @@ export default function DashboardLayout({
   }
 
   if (!user) {
-    router.replace(
-      "/login"
-    );
-
     return null;
   }
 
@@ -82,7 +72,6 @@ export default function DashboardLayout({
           <h1 className="font-semibold">
             Data Manage
           </h1>
-
           <p className="mt-1 text-xs text-muted-foreground">
             Dataset management
           </p>
@@ -92,38 +81,27 @@ export default function DashboardLayout({
           {links
             .filter(
               (link) =>
-                link.label !==
-                  "Users" ||
-                user.role ===
-                  "admin"
+                link.label !== "Users" ||
+                user.role === "admin",
             )
-            .map(
-              (link) => {
-                const active =
-                  pathname ===
-                  link.href;
+            .map((link) => {
+              const active =
+                pathname === link.href;
 
-                return (
-                  <Link
-                    key={
-                      link.href
-                    }
-                    href={
-                      link.href
-                    }
-                    className={`block rounded-lg px-3 py-2 text-sm ${
-                      active
-                        ? "bg-accent text-accent-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                    }`}
-                  >
-                    {
-                      link.label
-                    }
-                  </Link>
-                );
-              }
-            )}
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className={`block rounded-lg px-3 py-2 text-sm ${
+                    active
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
         </nav>
 
         <div className="absolute inset-x-0 bottom-0 border-t p-4">
@@ -136,12 +114,13 @@ export default function DashboardLayout({
           </p>
 
           <button
+            type="button"
             onClick={async () => {
-              await logout();
-
-              router.push(
-                "/login"
-              );
+              try {
+                await logout();
+              } finally {
+                router.replace("/login");
+              }
             }}
             className="mt-3 w-full rounded-lg border px-3 py-2 text-sm hover:bg-accent"
           >

@@ -6,49 +6,83 @@ export async function api<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const hasBody =
+    options.body !== undefined &&
+    options.body !== null;
+
   const isFormData =
+    typeof FormData !== "undefined" &&
     options.body instanceof FormData;
+
+  const headers = new Headers(
+    options.headers,
+  );
+
+  if (isFormData) {
+    headers.delete("Content-Type");
+  } else if (hasBody) {
+    headers.set(
+      "Content-Type",
+      "application/json",
+    );
+  } else {
+    headers.delete("Content-Type");
+  }
 
   const response = await fetch(
     `${API_URL}${path}`,
     {
       ...options,
       credentials: "include",
-
-      headers: {
-        ...(isFormData
-          ? {}
-          : {
-              "Content-Type": "application/json",
-            }),
-        ...(options.headers ?? {}),
-      },
-
+      headers,
       cache: "no-store",
     },
   );
 
   const contentType =
-    response.headers.get("content-type");
+    response.headers.get(
+      "content-type",
+    );
 
-  const body = contentType?.includes(
-    "application/json",
-  )
-    ? await response.json()
-    : await response.text();
+  const text = await response.text();
+
+  let body: unknown = text;
+
+  if (
+    text &&
+    contentType?.includes(
+      "application/json",
+    )
+  ) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
 
   if (!response.ok) {
     const message =
       typeof body === "object" &&
       body !== null &&
       "message" in body
-        ? String(body.message)
+        ? String(
+            (
+              body as {
+                message: unknown;
+              }
+            ).message,
+          )
         : typeof body === "string" &&
             body.trim()
           ? body
           : "Request failed.";
 
     throw new Error(message);
+  }
+
+  if (!text) {
+    return undefined as T;
   }
 
   return body as T;

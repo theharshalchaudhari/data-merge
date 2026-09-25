@@ -29,6 +29,10 @@
     "./user": {
       "types": "./src/user.ts",
       "default": "./src/user.ts"
+    },
+    "./view": {
+      "types": "./src/view.ts",
+      "default": "./src/view.ts"
     }
   },
   "scripts": {

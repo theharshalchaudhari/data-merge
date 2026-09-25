@@ -22,17 +22,18 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS clients (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    description TEXT
 );
 
 CREATE TABLE IF NOT EXISTS views (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL UNIQUE,
+    client_id UUID NOT NULL
+        REFERENCES clients(id)
+        ON DELETE CASCADE,
+    name TEXT NOT NULL,
     description TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    CONSTRAINT views_client_name_unique
+        UNIQUE (client_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -43,6 +44,16 @@ CREATE TABLE IF NOT EXISTS sessions (
     token_hash TEXT NOT NULL UNIQUE,
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS classes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    class_id INTEGER NOT NULL UNIQUE,
+    class_name TEXT NOT NULL UNIQUE,
+    CONSTRAINT classes_class_id_non_negative
+        CHECK (class_id >= 0),
+    CONSTRAINT classes_class_name_not_empty
+        CHECK (length(trim(class_name)) > 0)
 );
 
 CREATE TABLE IF NOT EXISTS metadata (
@@ -58,8 +69,7 @@ CREATE TABLE IF NOT EXISTS metadata (
         CHECK (
             annotation_type IN (
                 'bbox',
-                'polygon',
-                'segmentation'
+                'background_images'
             )
         ),
     annotations JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -68,15 +78,15 @@ CREATE TABLE IF NOT EXISTS metadata (
     original_root_folders TEXT[] NOT NULL DEFAULT '{}',
     source_locations TEXT[] NOT NULL DEFAULT '{}',
     description TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT metadata_client_view_name_unique
-        UNIQUE (
-            client_id,
-            view_id,
-            name
-        )
+        UNIQUE (client_id, view_id, name)
 );
+
+CREATE INDEX IF NOT EXISTS idx_views_client_id
+    ON views(client_id);
+
+CREATE INDEX IF NOT EXISTS idx_classes_class_id
+    ON classes(class_id);
 
 CREATE INDEX IF NOT EXISTS idx_metadata_client_id
     ON metadata(client_id);
@@ -118,26 +128,30 @@ BEFORE UPDATE ON users
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at();
 
-DROP TRIGGER IF EXISTS clients_updated_at
-ON clients;
-
-CREATE TRIGGER clients_updated_at
-BEFORE UPDATE ON clients
-FOR EACH ROW
-EXECUTE FUNCTION update_updated_at();
-
-DROP TRIGGER IF EXISTS views_updated_at
-ON views;
-
-CREATE TRIGGER views_updated_at
-BEFORE UPDATE ON views
-FOR EACH ROW
-EXECUTE FUNCTION update_updated_at();
-
-DROP TRIGGER IF EXISTS metadata_updated_at
-ON metadata;
-
-CREATE TRIGGER metadata_updated_at
-BEFORE UPDATE ON metadata
-FOR EACH ROW
-EXECUTE FUNCTION update_updated_at();
+INSERT INTO classes (
+    class_id,
+    class_name
+)
+VALUES
+    (0, 'Person'),
+    (1, 'helmet'),
+    (2, 'face_uncover'),
+    (3, 'pagdi'),
+    (4, 'fire'),
+    (5, 'weapon'),
+    (6, 'knife'),
+    (7, 'UPS'),
+    (8, 'Cylinder'),
+    (9, 'bags'),
+    (10, 'Handbags'),
+    (11, 'Suitcase'),
+    (12, 'cartons'),
+    (13, 'Batteries'),
+    (14, 'mask'),
+    (15, 'burka'),
+    (16, 'cap'),
+    (17, 'scarf'),
+    (18, 'others')
+ON CONFLICT (class_id)
+DO UPDATE SET
+    class_name = EXCLUDED.class_name;

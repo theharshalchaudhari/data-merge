@@ -10,6 +10,31 @@ import {
 import { scanDatasetFolder } from "./scanner.js";
 import { validateYoloAnnotations } from "./validator.js";
 
+type YoloAnnotation = {
+  class_id: number;
+  center_x: number;
+  center_y: number;
+  width: number;
+  height: number;
+};
+
+function normalizePath(value: string): string {
+  return value
+    .replaceAll("\\", "/")
+    .replace(/^\/+/, "");
+}
+
+function getRootFolder(relativePath: string): string {
+  const normalized = normalizePath(relativePath);
+  const firstSlash = normalized.indexOf("/");
+
+  if (firstSlash === -1) {
+    return normalized;
+  }
+
+  return normalized.slice(0, firstSlash);
+}
+
 async function sha256File(
   filePath: string,
 ): Promise<string> {
@@ -21,43 +46,122 @@ async function sha256File(
     .digest("hex");
 }
 
-function normalizePath(
-  value: string,
-): string {
-  return value
-    .replaceAll("\\", "/")
-    .replace(/^\/+/, "");
+async function fileExists(
+  filePath: string,
+): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function getRootFolder(
-  relativePath: string,
-): string {
-  const normalized =
-    normalizePath(relativePath);
+function parseYoloAnnotations(
+  content: string,
+): YoloAnnotation[] {
+  const annotations: YoloAnnotation[] = [];
 
-  const firstSlash =
-    normalized.indexOf("/");
+  const lines = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 
-  if (firstSlash === -1) {
-    return normalized;
+  for (const line of lines) {
+    const parts = line.split(/\s+/);
+
+    if (parts.length !== 5) {
+      throw new Error(
+        `Invalid YOLO annotation: expected 5 values, received ${parts.length}.`,
+      );
+    }
+
+    const classId = Number(parts[0]);
+    const centerX = Number(parts[1]);
+    const centerY = Number(parts[2]);
+    const width = Number(parts[3]);
+    const height = Number(parts[4]);
+
+    if (
+      !Number.isInteger(classId) ||
+      classId < 0
+    ) {
+      throw new Error(
+        `Invalid YOLO class ID: ${parts[0]}.`,
+      );
+    }
+
+    const coordinates = [
+      centerX,
+      centerY,
+      width,
+      height,
+    ];
+
+    if (
+      !coordinates.every(
+        (value) =>
+          Number.isFinite(value) &&
+          value >= 0 &&
+          value <= 1,
+      )
+    ) {
+      throw new Error(
+        `Invalid YOLO coordinates: ${line}`,
+      );
+    }
+
+    annotations.push({
+      class_id: classId,
+      center_x: centerX,
+      center_y: centerY,
+      width,
+      height,
+    });
   }
 
-  return normalized.slice(
-    0,
-    firstSlash,
+  return annotations;
+}
+
+function isYoloAnnotation(
+  annotation: unknown,
+): annotation is YoloAnnotation {
+  if (
+    !annotation ||
+    typeof annotation !== "object"
+  ) {
+    return false;
+  }
+
+  const value =
+    annotation as Record<
+      string,
+      unknown
+    >;
+
+  return (
+    typeof value.class_id === "number" &&
+    Number.isInteger(value.class_id) &&
+    value.class_id >= 0 &&
+    typeof value.center_x === "number" &&
+    Number.isFinite(value.center_x) &&
+    typeof value.center_y === "number" &&
+    Number.isFinite(value.center_y) &&
+    typeof value.width === "number" &&
+    Number.isFinite(value.width) &&
+    typeof value.height === "number" &&
+    Number.isFinite(value.height)
   );
 }
 
 function dedupeAnnotations(
-  annotations: unknown[],
-): unknown[] {
+  annotations: YoloAnnotation[],
+): YoloAnnotation[] {
   const seen = new Set<string>();
-  const result: unknown[] = [];
+  const result: YoloAnnotation[] = [];
 
   for (const annotation of annotations) {
-    const key = JSON.stringify(
-      annotation,
-    );
+    const key = JSON.stringify(annotation);
 
     if (seen.has(key)) {
       continue;
@@ -71,44 +175,25 @@ function dedupeAnnotations(
 }
 
 function annotationsToYolo(
-  annotations: unknown[],
+  annotations: YoloAnnotation[],
 ): string {
-  const lines: string[] = [];
-
-  for (const annotation of annotations) {
-    const item = annotation as {
-      geometry?: {
-        format?: string;
-        values?: unknown;
-      };
-    };
-
-    const values =
-      item.geometry?.values;
-
-    if (
-      !Array.isArray(values) ||
-      values.length !== 5
-    ) {
-      continue;
-    }
-
-    if (
-      !values.every(
-        (value) =>
-          typeof value === "number" &&
-          Number.isFinite(value),
-      )
-    ) {
-      continue;
-    }
-
-    lines.push(values.join(" "));
+  if (annotations.length === 0) {
+    return "";
   }
 
-  return lines.length > 0
-    ? `${lines.join("\n")}\n`
-    : "";
+  return (
+    annotations
+      .map((annotation) =>
+        [
+          annotation.class_id,
+          annotation.center_x,
+          annotation.center_y,
+          annotation.width,
+          annotation.height,
+        ].join(" "),
+      )
+      .join("\n") + "\n"
+  );
 }
 
 function uniqueStrings(
@@ -117,25 +202,12 @@ function uniqueStrings(
   return Array.from(
     new Set(
       values.filter(
-        (
-          value,
-        ): value is string =>
+        (value): value is string =>
           typeof value === "string" &&
           value.length > 0,
       ),
     ),
   );
-}
-
-async function fileExists(
-  filePath: string,
-): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function validateDataset(
@@ -189,7 +261,9 @@ async function validateDataset(
       validation.annotationCount;
   }
 
-  for (const orphan of scan.orphanLabels) {
+  for (
+    const orphan of scan.orphanLabels
+  ) {
     errors.push({
       file: orphan,
       message:
@@ -202,6 +276,55 @@ async function validateDataset(
     errors,
     annotationRows,
   };
+}
+
+async function validateClassIds(
+  annotations: YoloAnnotation[],
+): Promise<void> {
+  if (annotations.length === 0) {
+    return;
+  }
+
+  const classIds = Array.from(
+    new Set(
+      annotations.map(
+        (annotation: YoloAnnotation) =>
+          annotation.class_id,
+      ),
+    ),
+  );
+
+  const result =
+    await db.query(
+      `
+      SELECT class_id
+      FROM classes
+      WHERE class_id = ANY($1::int[])
+      `,
+      [classIds],
+    );
+
+  const registeredIds =
+    new Set<number>(
+      result.rows.map(
+        (row: { class_id: number }) =>
+          Number(row.class_id),
+      ),
+    );
+
+  const missingIds =
+    classIds.filter(
+      (classId) =>
+        !registeredIds.has(
+          classId,
+        ),
+    );
+
+  if (missingIds.length > 0) {
+    throw new Error(
+      `Class IDs ${missingIds.join(", ")} are not registered.`,
+    );
+  }
 }
 
 export async function uploadDataset(
@@ -222,12 +345,12 @@ export async function uploadDataset(
   const clientResult =
     await db.query(
       `
-        SELECT
-          id,
-          name
-        FROM clients
-        WHERE id = $1
-        LIMIT 1
+      SELECT
+        id,
+        name
+      FROM clients
+      WHERE id = $1
+      LIMIT 1
       `,
       [clientId],
     );
@@ -244,14 +367,18 @@ export async function uploadDataset(
   const viewResult =
     await db.query(
       `
-        SELECT
-          id,
-          name
-        FROM views
-        WHERE id = $1
-        LIMIT 1
+      SELECT
+        id,
+        name
+      FROM views
+      WHERE id = $1
+        AND client_id = $2
+      LIMIT 1
       `,
-      [viewId],
+      [
+        viewId,
+        clientId,
+      ],
     );
 
   const view =
@@ -259,7 +386,7 @@ export async function uploadDataset(
 
   if (!view) {
     throw new Error(
-      "Selected view was not found.",
+      "Selected view was not found for this client.",
     );
   }
 
@@ -269,8 +396,8 @@ export async function uploadDataset(
     );
 
   if (
-    validation.scan.images
-      .length === 0
+    validation.scan.images.length ===
+    0
   ) {
     throw new Error(
       "No supported images were uploaded.",
@@ -301,8 +428,10 @@ export async function uploadDataset(
     );
   }
 
-  for (const item of
-    validation.scan.images) {
+  for (
+    const item of validation.scan
+      .images
+  ) {
     const normalized =
       normalizePath(
         item.relativePath,
@@ -329,8 +458,10 @@ export async function uploadDataset(
   let conflicts = 0;
   let annotationCount = 0;
 
-  for (const item of
-    validation.scan.images) {
+  for (
+    const item of validation.scan
+      .images
+  ) {
     if (!item.labelPath) {
       continue;
     }
@@ -341,7 +472,9 @@ export async function uploadDataset(
       );
 
     const imageName =
-      path.basename(relativePath);
+      path.basename(
+        relativePath,
+      );
 
     const labelRelativePath =
       relativePath.replace(
@@ -369,9 +502,23 @@ export async function uploadDataset(
       !annotationValidation.valid
     ) {
       throw new Error(
-        `Validation failed for ${relativePath}.`,
+        `Validation failed for ${relativePath}: ${annotationValidation.errors.join("; ")}`,
       );
     }
+
+    const annotations =
+      parseYoloAnnotations(
+        labelContent,
+      );
+
+    await validateClassIds(
+      annotations,
+    );
+
+    const annotationType =
+      annotations.length > 0
+        ? "bbox"
+        : "background_images";
 
     const rawImagePath =
       path.join(
@@ -400,21 +547,23 @@ export async function uploadDataset(
     const existingResult =
       await db.query(
         `
-          SELECT
-            id,
-            name,
-            image_hash,
-            annotations,
-            root_folders,
-            original_root_folders,
-            source_locations
-          FROM metadata
-          WHERE client_id = $1
-            AND name = $2
-          LIMIT 1
+        SELECT
+          id,
+          image_hash,
+          annotations,
+          annotation_type,
+          root_folders,
+          original_root_folders,
+          source_locations
+        FROM metadata
+        WHERE client_id = $1
+          AND view_id = $2
+          AND name = $3
+        LIMIT 1
         `,
         [
           clientId,
+          viewId,
           imageName,
         ],
       );
@@ -437,148 +586,19 @@ export async function uploadDataset(
         rawImageExists ||
         rawLabelExists
       ) {
-        const existingRawHash =
-          rawImageExists
-            ? await sha256File(
-                rawImagePath,
-              )
-            : null;
-
-        if (
-          existingRawHash &&
-          existingRawHash !== imageHash
-        ) {
-          conflicts++;
-          continue;
-        }
-
-        if (
-          existingRawHash === imageHash
-        ) {
-          const rawLabelContent =
-            rawLabelExists
-              ? await fs.readFile(
-                  rawLabelPath,
-                  "utf8",
-                )
-              : "";
-
-          const rawValidation =
-            validateYoloAnnotations(
-              rawLabelContent,
+        if (rawImageExists) {
+          const existingRawHash =
+            await sha256File(
+              rawImagePath,
             );
 
-          if (!rawValidation.valid) {
+          if (
+            existingRawHash !==
+            imageHash
+          ) {
             conflicts++;
             continue;
           }
-
-          const annotations =
-            dedupeAnnotations([
-              ...rawValidation.annotations,
-              ...annotationValidation.annotations,
-            ]);
-
-          await fs.mkdir(
-            path.dirname(
-              rawLabelPath,
-            ),
-            {
-              recursive: true,
-            },
-          );
-
-          await fs.writeFile(
-            rawLabelPath,
-            annotationsToYolo(
-              annotations,
-            ),
-            "utf8",
-          );
-
-          await fs.mkdir(
-            path.dirname(
-              metadataImagePath,
-            ),
-            {
-              recursive: true,
-            },
-          );
-
-          await fs.mkdir(
-            path.dirname(
-              metadataLabelPath,
-            ),
-            {
-              recursive: true,
-            },
-          );
-
-          await fs.copyFile(
-            rawImagePath,
-            metadataImagePath,
-          );
-
-          await fs.writeFile(
-            metadataLabelPath,
-            annotationsToYolo(
-              annotations,
-            ),
-            "utf8",
-          );
-
-          const metadataAnnotations =
-            annotations;
-
-          await db.query(
-            `
-              INSERT INTO metadata (
-                id,
-                client_id,
-                view_id,
-                name,
-                annotation_type,
-                annotations,
-                image_hash,
-                root_folders,
-                original_root_folders,
-                source_locations,
-                description
-              )
-              VALUES (
-                gen_random_uuid(),
-                $1,
-                $2,
-                $3,
-                $4,
-                $5::jsonb,
-                $6,
-                $7::text[],
-                $8::text[],
-                $9::text[],
-                NULL
-              )
-            `,
-            [
-              clientId,
-              viewId,
-              imageName,
-              "bbox",
-              JSON.stringify(
-                metadataAnnotations,
-              ),
-              imageHash,
-              [rootFolder],
-              [rootFolder],
-              [relativePath],
-            ],
-          );
-
-          uploaded++;
-          annotationCount +=
-            annotationValidation.annotationCount;
-
-          continue;
         }
 
         if (!rawImageExists) {
@@ -617,9 +637,9 @@ export async function uploadDataset(
           path.dirname(
             rawImagePath,
           ),
-          {
-            recursive: true,
-          },
+            {
+              recursive: true,
+            },
         );
 
         await fs.mkdir(
@@ -660,54 +680,57 @@ export async function uploadDataset(
         },
       );
 
-      await fs.copyFile(
-        item.imagePath,
-        metadataImagePath,
-      );
+      if (
+        !(await fileExists(
+          metadataImagePath,
+        ))
+      ) {
+        await fs.copyFile(
+          item.imagePath,
+          metadataImagePath,
+        );
+      }
 
       await fs.writeFile(
         metadataLabelPath,
-        labelContent,
+        annotationsToYolo(
+          annotations,
+        ),
         "utf8",
       );
 
-      const annotations =
-        annotationValidation.annotations;
-
       await db.query(
         `
-          INSERT INTO metadata (
-            id,
-            client_id,
-            view_id,
-            name,
-            annotation_type,
-            annotations,
-            image_hash,
-            root_folders,
-            original_root_folders,
-            source_locations,
-            description
-          )
-          VALUES (
-            gen_random_uuid(),
-            $1,
-            $2,
-            $3,
-            $4,
-            $5::jsonb,
-            $6,
-            $7::text[],
-            $8::text[],
-            $9::text[],
-            NULL
-          )
+        INSERT INTO metadata (
+          client_id,
+          view_id,
+          name,
+          annotation_type,
+          annotations,
+          image_hash,
+          root_folders,
+          original_root_folders,
+          source_locations,
+          description
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5::jsonb,
+          $6,
+          $7::text[],
+          $8::text[],
+          $9::text[],
+          NULL
+        )
         `,
         [
           clientId,
           viewId,
           imageName,
-          "bbox",
+          annotationType,
           JSON.stringify(
             annotations,
           ),
@@ -720,7 +743,7 @@ export async function uploadDataset(
 
       uploaded++;
       annotationCount +=
-        annotationValidation.annotationCount;
+        annotations.length;
 
       continue;
     }
@@ -740,10 +763,20 @@ export async function uploadDataset(
         ? existing.annotations
         : [];
 
+    const normalizedExisting =
+      existingAnnotations.filter(
+        (
+          annotation: unknown,
+        ): annotation is YoloAnnotation =>
+          isYoloAnnotation(
+            annotation,
+          ),
+      );
+
     const mergedAnnotations =
       dedupeAnnotations([
-        ...existingAnnotations,
-        ...annotationValidation.annotations,
+        ...normalizedExisting,
+        ...annotations,
       ]);
 
     const rootFolders =
@@ -776,28 +809,13 @@ export async function uploadDataset(
         relativePath,
       ]);
 
-    await db.query(
-      `
-        UPDATE metadata
-        SET
-          annotations = $1::jsonb,
-          root_folders = $2::text[],
-          original_root_folders = $3::text[],
-          source_locations = $4::text[],
-          view_id = $5,
-          updated_at = now()
-        WHERE id = $6
-      `,
-      [
-        JSON.stringify(
-          mergedAnnotations,
-        ),
-        rootFolders,
-        originalRootFolders,
-        sourceLocations,
-        viewId,
-        existing.id,
-      ],
+    await fs.mkdir(
+      path.dirname(
+        metadataImagePath,
+      ),
+      {
+        recursive: true,
+      },
     );
 
     await fs.mkdir(
@@ -809,6 +827,17 @@ export async function uploadDataset(
       },
     );
 
+    if (
+      !(await fileExists(
+        metadataImagePath,
+      ))
+    ) {
+      await fs.copyFile(
+        item.imagePath,
+        metadataImagePath,
+      );
+    }
+
     await fs.writeFile(
       metadataLabelPath,
       annotationsToYolo(
@@ -817,46 +846,30 @@ export async function uploadDataset(
       "utf8",
     );
 
-    if (
-      !(await fileExists(
-        metadataImagePath,
-      ))
-    ) {
-      const rawImageExists =
-        await fileExists(
-          rawImagePath,
-        );
-
-      if (rawImageExists) {
-        await fs.mkdir(
-          path.dirname(
-            metadataImagePath,
-          ),
-          {
-            recursive: true,
-          },
-        );
-
-        await fs.copyFile(
-          rawImagePath,
-          metadataImagePath,
-        );
-      } else {
-        await fs.mkdir(
-          path.dirname(
-            metadataImagePath,
-          ),
-          {
-            recursive: true,
-          },
-        );
-
-        await fs.copyFile(
-          item.imagePath,
-          metadataImagePath,
-        );
-      }
-    }
+    await db.query(
+      `
+      UPDATE metadata
+      SET
+        annotations = $1::jsonb,
+        annotation_type = $2,
+        root_folders = $3::text[],
+        original_root_folders = $4::text[],
+        source_locations = $5::text[]
+      WHERE id = $6
+      `,
+      [
+        JSON.stringify(
+          mergedAnnotations,
+        ),
+        mergedAnnotations.length > 0
+          ? "bbox"
+          : "background_images",
+        rootFolders,
+        originalRootFolders,
+        sourceLocations,
+        existing.id,
+      ],
+    );
 
     if (
       !(await fileExists(
@@ -878,32 +891,26 @@ export async function uploadDataset(
       );
     }
 
-    if (
-      !(await fileExists(
+    await fs.mkdir(
+      path.dirname(
         rawLabelPath,
-      ))
-    ) {
-      await fs.mkdir(
-        path.dirname(
-          rawLabelPath,
-        ),
-        {
-          recursive: true,
-        },
-      );
+      ),
+      {
+        recursive: true,
+      },
+    );
 
-      await fs.writeFile(
-        rawLabelPath,
-        annotationsToYolo(
-          mergedAnnotations,
-        ),
-        "utf8",
-      );
-    }
+    await fs.writeFile(
+      rawLabelPath,
+      annotationsToYolo(
+        mergedAnnotations,
+      ),
+      "utf8",
+    );
 
     merged++;
     annotationCount +=
-      annotationValidation.annotationCount;
+      annotations.length;
   }
 
   skipped =
