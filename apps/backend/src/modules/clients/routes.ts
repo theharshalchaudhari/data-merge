@@ -25,6 +25,13 @@ const clientSchema =
         .optional()
   });
 
+const clientIdSchema =
+  z.object({
+    id:
+      z.string()
+        .uuid()
+  });
+
 export async function registerClientRoutes(
   app: FastifyInstance
 ) {
@@ -59,7 +66,10 @@ export async function registerClientRoutes(
     "/api/clients",
     {
       preHandler:
-        requireRole("admin")
+        requireRole(
+          "admin",
+          "editor"
+        )
     },
     async (
       request,
@@ -84,8 +94,8 @@ export async function registerClientRoutes(
             RETURNING *
             `,
             [
-              input.name,
-              input.description ??
+              input.name.trim(),
+              input.description?.trim() ||
                 null
             ]
           );
@@ -95,7 +105,9 @@ export async function registerClientRoutes(
           .send(
             result.rows[0]
           );
-      } catch (error: any) {
+      } catch (
+        error: any
+      ) {
         if (
           error?.code ===
           "23505"
@@ -110,6 +122,87 @@ export async function registerClientRoutes(
 
         throw error;
       }
+    }
+  );
+
+  app.delete(
+    "/api/clients/:id",
+    {
+      preHandler:
+        requireRole(
+          "admin",
+          "editor"
+        )
+    },
+    async (
+      request,
+      reply
+    ) => {
+      const parsed =
+        clientIdSchema.safeParse(
+          request.params
+        );
+
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send({
+            message:
+              "Invalid client ID."
+          });
+      }
+
+      const metadataResult =
+        await db.query(
+          `
+          SELECT COUNT(*)::int AS count
+          FROM metadata
+          WHERE client_id = $1
+          `,
+          [
+            parsed.data.id
+          ]
+        );
+
+      if (
+        metadataResult.rows[0].count >
+        0
+      ) {
+        return reply
+          .code(409)
+          .send({
+            message:
+              "This client cannot be deleted because it contains metadata."
+          });
+      }
+
+      const result =
+        await db.query(
+          `
+          DELETE FROM clients
+          WHERE id = $1
+          RETURNING id
+          `,
+          [
+            parsed.data.id
+          ]
+        );
+
+      if (
+        result.rows.length ===
+        0
+      ) {
+        return reply
+          .code(404)
+          .send({
+            message:
+              "Client not found."
+          });
+      }
+
+      return reply.send({
+        success: true
+      });
     }
   );
 }

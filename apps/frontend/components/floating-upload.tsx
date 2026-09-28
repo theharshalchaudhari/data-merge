@@ -1,11 +1,13 @@
 "use client";
 
 import {
-  ChangeEvent,
   useEffect,
   useRef,
   useState,
+  type ChangeEvent,
+  type ReactNode,
 } from "react";
+
 import {
   AlertTriangle,
   CheckCircle2,
@@ -15,15 +17,28 @@ import {
   Image as ImageIcon,
   Loader2,
   Pencil,
+  Plus,
+  Server,
   Upload,
   X,
 } from "lucide-react";
-import type { Client, View } from "@data-manage/types";
-import { api } from "../../../lib/api";
-import { useAuth } from "../../../hooks/use-auth";
+
+import type {
+  Client,
+  View,
+} from "@data-manage/types";
+
+import { api } from "../lib/api";
+import { useAuth } from "../hooks/use-auth";
 
 type BrowserFile = File & {
   webkitRelativePath?: string;
+};
+
+type DatasetType = {
+  id: string;
+  name: string;
+  description: string | null;
 };
 
 type ScanError = {
@@ -53,6 +68,11 @@ type UploadResult = {
   annotationCount: number;
   images: number;
   annotationFiles: number;
+  fileCount?: number;
+  datasetType?: string;
+  client?: string;
+  view?: string;
+  rootFolder?: string;
 };
 
 const IMAGE_EXTENSIONS = new Set([
@@ -63,7 +83,9 @@ const IMAGE_EXTENSIONS = new Set([
   ".bmp",
 ]);
 
-function normalizeRelativePath(value: string) {
+function normalizeRelativePath(
+  value: string,
+): string {
   return value
     .replaceAll("\\", "/")
     .split("/")
@@ -71,47 +93,84 @@ function normalizeRelativePath(value: string) {
     .join("/");
 }
 
-function getRelativePath(file: BrowserFile) {
-  const relativePath = file.webkitRelativePath?.trim();
+function getRelativePath(
+  file: BrowserFile,
+): string {
+  const relativePath =
+    file.webkitRelativePath?.trim();
 
   return relativePath
-    ? normalizeRelativePath(relativePath)
-    : normalizeRelativePath(file.name);
+    ? normalizeRelativePath(
+        relativePath,
+      )
+    : normalizeRelativePath(
+        file.name,
+      );
 }
 
-function getRootFolder(relativePath: string) {
-  const parts = normalizeRelativePath(relativePath)
-    .split("/")
-    .filter(Boolean);
+function getRootFolder(
+  relativePath: string,
+): string {
+  const parts =
+    normalizeRelativePath(
+      relativePath,
+    )
+      .split("/")
+      .filter(Boolean);
 
-  return parts.length > 1 ? parts[0] : "";
+  return parts.length > 1
+    ? parts[0]
+    : "";
 }
 
-function getPairKey(relativePath: string) {
-  return normalizeRelativePath(relativePath)
+function getPairKey(
+  relativePath: string,
+): string {
+  return normalizeRelativePath(
+    relativePath,
+  )
     .replace(/\.[^.]+$/, "")
     .toLowerCase();
 }
 
-function getExtension(file: BrowserFile) {
-  const name = file.name.toLowerCase();
-  const index = name.lastIndexOf(".");
+function getExtension(
+  file: BrowserFile,
+): string {
+  const name =
+    file.name.toLowerCase();
 
-  return index === -1 ? "" : name.slice(index);
+  const index =
+    name.lastIndexOf(".");
+
+  return index === -1
+    ? ""
+    : name.slice(index);
 }
 
-function isImage(file: BrowserFile) {
-  return IMAGE_EXTENSIONS.has(getExtension(file));
+function isImage(
+  file: BrowserFile,
+): boolean {
+  return IMAGE_EXTENSIONS.has(
+    getExtension(file),
+  );
 }
 
-function isLabel(file: BrowserFile) {
-  return file.name.toLowerCase().endsWith(".txt");
+function isLabel(
+  file: BrowserFile,
+): boolean {
+  return file.name
+    .toLowerCase()
+    .endsWith(".txt");
 }
 
-function validateYolo(content: string) {
+function validateYolo(
+  content: string,
+) {
   const lines = content
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) =>
+      line.trim(),
+    )
     .filter(Boolean);
 
   if (lines.length === 0) {
@@ -125,8 +184,13 @@ function validateYolo(content: string) {
 
   const errors: string[] = [];
 
-  for (let index = 0; index < lines.length; index++) {
-    const parts = lines[index].split(/\s+/);
+  for (
+    let index = 0;
+    index < lines.length;
+    index++
+  ) {
+    const parts =
+      lines[index].split(/\s+/);
 
     if (parts.length !== 5) {
       errors.push(
@@ -135,24 +199,40 @@ function validateYolo(content: string) {
       continue;
     }
 
-    const [classId, x, y, width, height] =
-      parts.map(Number);
+    const [
+      classId,
+      x,
+      y,
+      width,
+      height,
+    ] = parts.map(Number);
 
-    if (!Number.isInteger(classId) || classId < 0) {
+    if (
+      !Number.isInteger(classId) ||
+      classId < 0
+    ) {
       errors.push(
         `Line ${index + 1}: invalid class ID.`,
       );
       continue;
     }
 
-    if (!Number.isFinite(x) || x < 0 || x > 1) {
+    if (
+      !Number.isFinite(x) ||
+      x < 0 ||
+      x > 1
+    ) {
       errors.push(
         `Line ${index + 1}: invalid x.`,
       );
       continue;
     }
 
-    if (!Number.isFinite(y) || y < 0 || y > 1) {
+    if (
+      !Number.isFinite(y) ||
+      y < 0 ||
+      y > 1
+    ) {
       errors.push(
         `Line ${index + 1}: invalid y.`,
       );
@@ -183,7 +263,8 @@ function validateYolo(content: string) {
 
   return {
     valid: errors.length === 0,
-    annotationCount: lines.length,
+    annotationCount:
+      lines.length,
     errors,
     background: false,
   };
@@ -197,8 +278,12 @@ function Stat({
 }: {
   label: string;
   value: number | string;
-  tone?: "default" | "success" | "warning" | "danger";
-  icon?: React.ReactNode;
+  tone?:
+    | "default"
+    | "success"
+    | "warning"
+    | "danger";
+  icon?: ReactNode;
 }) {
   const valueClass =
     tone === "success"
@@ -228,63 +313,154 @@ function Stat({
   );
 }
 
-export default function UploadPage() {
+export default function FloatingUpload() {
   const { user } = useAuth();
 
   const folderInputRef =
     useRef<HTMLInputElement>(null);
 
-  const [clients, setClients] = useState<Client[]>([]);
-  const [views, setViews] = useState<View[]>([]);
+  const [
+    sourceOpen,
+    setSourceOpen,
+  ] = useState(false);
 
-  const [clientId, setClientId] = useState("");
-  const [viewId, setViewId] = useState("");
+  const [
+    modalOpen,
+    setModalOpen,
+  ] = useState(false);
 
-  const [files, setFiles] = useState<BrowserFile[]>([]);
-  const [folderName, setFolderName] = useState("");
-  const [renameFolder, setRenameFolder] =
-    useState("");
+  const [
+    clients,
+    setClients,
+  ] = useState<Client[]>([]);
 
-  const [scanResult, setScanResult] =
-    useState<ScanResult | null>(null);
+  const [
+    views,
+    setViews,
+  ] = useState<View[]>([]);
 
-  const [uploadResult, setUploadResult] =
-    useState<UploadResult | null>(null);
+  const [
+    datasetTypes,
+    setDatasetTypes,
+  ] = useState<DatasetType[]>([]);
 
-  const [scanning, setScanning] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [loadingClients, setLoadingClients] =
-    useState(true);
+  const [
+    clientId,
+    setClientId,
+  ] = useState("");
 
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [modalOpen, setModalOpen] = useState(false);
+  const [
+    viewId,
+    setViewId,
+  ] = useState("");
+
+  const [
+    datasetTypeId,
+    setDatasetTypeId,
+  ] = useState("");
+
+  const [
+    files,
+    setFiles,
+  ] = useState<BrowserFile[]>([]);
+
+  const [
+    folderName,
+    setFolderName,
+  ] = useState("");
+
+  const [
+    renameFolder,
+    setRenameFolder,
+  ] = useState("");
+
+  const [
+    scanResult,
+    setScanResult,
+  ] = useState<ScanResult | null>(
+    null,
+  );
+
+  const [
+    uploadResult,
+    setUploadResult,
+  ] = useState<UploadResult | null>(
+    null,
+  );
+
+  const [
+    scanning,
+    setScanning,
+  ] = useState(false);
+
+  const [
+    uploading,
+    setUploading,
+  ] = useState(false);
+
+  const [
+    loadingClients,
+    setLoadingClients,
+  ] = useState(true);
+
+  const [
+    loadingDatasetTypes,
+    setLoadingDatasetTypes,
+  ] = useState(true);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+  const [
+    message,
+    setMessage,
+  ] = useState("");
 
   const canRename =
     user?.role === "admin" ||
     user?.role === "editor";
 
   useEffect(() => {
-    async function loadClients() {
+    async function loadInitialData() {
       try {
         setLoadingClients(true);
+        setLoadingDatasetTypes(true);
         setError("");
 
+        const [
+          clientsResult,
+          datasetTypesResult,
+        ] = await Promise.all([
+          api<Client[]>(
+            "/api/clients",
+          ),
+          api<DatasetType[]>(
+            "/api/dataset-types",
+          ),
+        ]);
+
         setClients(
-          await api<Client[]>("/api/clients"),
+          clientsResult,
+        );
+
+        setDatasetTypes(
+          datasetTypesResult,
         );
       } catch (value) {
         setError(
           value instanceof Error
             ? value.message
-            : "Failed to load clients.",
+            : "Failed to load upload data.",
         );
       } finally {
         setLoadingClients(false);
+        setLoadingDatasetTypes(false);
       }
     }
 
-    void loadClients();
+    void loadInitialData();
   }, []);
 
   useEffect(() => {
@@ -298,12 +474,12 @@ export default function UploadPage() {
       try {
         setError("");
 
-        setViews(
+        const result =
           await api<View[]>(
             `/api/views?clientId=${encodeURIComponent(clientId)}`,
-          ),
-        );
+          );
 
+        setViews(result);
         setViewId("");
       } catch (value) {
         setViews([]);
@@ -328,11 +504,21 @@ export default function UploadPage() {
     setUploadResult(null);
     setMessage("");
     setError("");
-    setModalOpen(false);
+    setClientId("");
+    setViewId("");
+    setDatasetTypeId("");
+    setViews([]);
 
     if (folderInputRef.current) {
-      folderInputRef.current.value = "";
+      folderInputRef.current.value =
+        "";
     }
+  }
+
+  function openPcPicker() {
+    setSourceOpen(false);
+
+    folderInputRef.current?.click();
   }
 
   function handleFolderSelect(
@@ -343,56 +529,62 @@ export default function UploadPage() {
     setScanResult(null);
     setUploadResult(null);
 
-    const selected = Array.from(
-      event.target.files ?? [],
-    ) as BrowserFile[];
+    const selected =
+      Array.from(
+        event.target.files ?? [],
+      ) as BrowserFile[];
+
+    event.target.value = "";
 
     if (!selected.length) {
-      resetDataset();
       return;
     }
 
-    const root = getRootFolder(
-      getRelativePath(selected[0]),
-    );
+    const root =
+      getRootFolder(
+        getRelativePath(
+          selected[0],
+        ),
+      );
 
     if (!root) {
-      resetDataset();
-
       setError(
         "Unable to determine the selected dataset folder.",
       );
-
       return;
     }
 
-    const invalidRootFiles = selected.filter(
-      (file) =>
-        !getRelativePath(file).startsWith(
-          `${root}/`,
-        ),
-    );
+    const invalidRootFiles =
+      selected.filter(
+        (file) =>
+          !getRelativePath(
+            file,
+          ).startsWith(
+            `${root}/`,
+          ),
+      );
 
     if (invalidRootFiles.length) {
-      resetDataset();
-
       setError(
         "The selected files do not belong to one dataset folder.",
       );
-
       return;
     }
 
     setFiles(selected);
     setFolderName(root);
     setRenameFolder(root);
+    setModalOpen(true);
 
-    void scanFolder(selected, root);
+    void scanFolder(
+      selected,
+      root,
+    );
   }
 
   async function scanFolder(
-    selectedFiles = files,
-    selectedRoot = folderName,
+    selectedFiles: BrowserFile[],
+    selectedRoot: string,
   ) {
     if (
       !selectedFiles.length ||
@@ -409,21 +601,24 @@ export default function UploadPage() {
     setModalOpen(true);
 
     try {
-      const imageMap = new Map<
-        string,
-        BrowserFile
-      >();
+      const imageMap =
+        new Map<
+          string,
+          BrowserFile
+        >();
 
-      const labelMap = new Map<
-        string,
-        BrowserFile
-      >();
+      const labelMap =
+        new Map<
+          string,
+          BrowserFile
+        >();
 
       let imageCount = 0;
       let txtCount = 0;
 
       for (const file of selectedFiles) {
-        const relativePath = getRelativePath(file);
+        const relativePath =
+          getRelativePath(file);
 
         if (
           !relativePath.startsWith(
@@ -435,14 +630,20 @@ export default function UploadPage() {
 
         if (isImage(file)) {
           imageMap.set(
-            getPairKey(relativePath),
+            getPairKey(
+              relativePath,
+            ),
             file,
           );
 
           imageCount++;
-        } else if (isLabel(file)) {
+        } else if (
+          isLabel(file)
+        ) {
           labelMap.set(
-            getPairKey(relativePath),
+            getPairKey(
+              relativePath,
+            ),
             file,
           );
 
@@ -450,7 +651,8 @@ export default function UploadPage() {
         }
       }
 
-      const errors: ScanError[] = [];
+      const errors: ScanError[] =
+        [];
 
       let validPairs = 0;
       let backgroundImages = 0;
@@ -458,25 +660,39 @@ export default function UploadPage() {
       let txtWithoutImage = 0;
       let imageWithoutTxt = 0;
 
-      for (const [key, image] of imageMap) {
-        const label = labelMap.get(key);
+      for (const [
+        key,
+        image,
+      ] of imageMap) {
+        const label =
+          labelMap.get(key);
 
         if (!label) {
           imageWithoutTxt++;
 
           errors.push({
-            file: getRelativePath(image),
-            message: "Image without TXT",
+            file:
+              getRelativePath(
+                image,
+              ),
+            message:
+              "Image without TXT",
           });
 
           continue;
         }
 
-        const content = await label.text();
-        const validation =
-          validateYolo(content);
+        const content =
+          await label.text();
 
-        if (validation.background) {
+        const validation =
+          validateYolo(
+            content,
+          );
+
+        if (
+          validation.background
+        ) {
           backgroundImages++;
           validPairs++;
           continue;
@@ -486,8 +702,14 @@ export default function UploadPage() {
           corruptedTxt++;
 
           errors.push({
-            file: getRelativePath(label),
-            message: "Corrupted TXT",
+            file:
+              getRelativePath(
+                label,
+              ),
+            message:
+              validation.errors.join(
+                "; ",
+              ),
           });
 
           continue;
@@ -496,7 +718,10 @@ export default function UploadPage() {
         validPairs++;
       }
 
-      for (const [key, label] of labelMap) {
+      for (const [
+        key,
+        label,
+      ] of labelMap) {
         if (imageMap.has(key)) {
           continue;
         }
@@ -504,16 +729,24 @@ export default function UploadPage() {
         txtWithoutImage++;
 
         errors.push({
-          file: getRelativePath(label),
-          message: "TXT without image",
+          file:
+            getRelativePath(
+              label,
+            ),
+          message:
+            "TXT without image",
         });
       }
 
       const result: ScanResult = {
-        rootFolder: selectedRoot,
-        files: selectedFiles.length,
-        images: imageCount,
-        txt: txtCount,
+        rootFolder:
+          selectedRoot,
+        files:
+          selectedFiles.length,
+        images:
+          imageCount,
+        txt:
+          txtCount,
         validPairs,
         backgroundImages,
         corruptedTxt,
@@ -539,6 +772,28 @@ export default function UploadPage() {
     }
   }
 
+  function getSelectedRoot(
+    selectedFiles: BrowserFile[],
+  ) {
+    const roots =
+      new Set<string>();
+
+    for (const file of selectedFiles) {
+      const root =
+        getRootFolder(
+          getRelativePath(file),
+        );
+
+      if (root) {
+        roots.add(root);
+      }
+    }
+
+    return roots.size === 1
+      ? Array.from(roots)[0]
+      : "";
+  }
+
   async function uploadDataset() {
     if (
       !scanResult ||
@@ -547,15 +802,20 @@ export default function UploadPage() {
       return;
     }
 
-    if (!clientId || !viewId) {
+    if (
+      !clientId ||
+      !viewId ||
+      !datasetTypeId
+    ) {
       setError(
-        "Select a client and view before uploading.",
+        "Select a client, view, and dataset type before uploading.",
       );
 
       return;
     }
 
-    const root = getSelectedRoot(files);
+    const root =
+      getSelectedRoot(files);
 
     if (!root) {
       setError(
@@ -566,25 +826,39 @@ export default function UploadPage() {
     }
 
     const finalRoot =
-      canRename && renameFolder.trim()
+      canRename &&
+      renameFolder.trim()
         ? normalizeRelativePath(
             renameFolder.trim(),
-          ).replace(/\//g, "_")
+          ).replace(
+            /\//g,
+            "_",
+          )
         : root;
 
     if (!finalRoot) {
-      setError("Enter a valid folder name.");
+      setError(
+        "Enter a valid folder name.",
+      );
+
       return;
     }
 
-    const validFiles = files.filter((file) => {
-      const relativePath = getRelativePath(file);
+    const validFiles =
+      files.filter(
+        (file) => {
+          const relativePath =
+            getRelativePath(file);
 
-      return (
-        relativePath.startsWith(`${root}/`) &&
-        (isImage(file) || isLabel(file))
+          return (
+            relativePath.startsWith(
+              `${root}/`,
+            ) &&
+            (isImage(file) ||
+              isLabel(file))
+          );
+        },
       );
-    });
 
     if (!validFiles.length) {
       setError(
@@ -594,52 +868,89 @@ export default function UploadPage() {
       return;
     }
 
-    const relativePaths = validFiles.map(
-      (file) => {
-        const original = getRelativePath(file);
+    const relativePaths =
+      validFiles.map(
+        (file) => {
+          const original =
+            getRelativePath(
+              file,
+            );
 
-        return canRename &&
-          finalRoot !== root
-          ? `${finalRoot}/${original.slice(
-              root.length + 1,
-            )}`
-          : original;
-      },
-    );
+          return canRename &&
+            finalRoot !== root
+            ? `${finalRoot}/${original.slice(
+                root.length + 1,
+              )}`
+            : original;
+        },
+      );
 
     setUploading(true);
     setError("");
     setMessage("");
 
     try {
-      const form = new FormData();
+      const form =
+        new FormData();
 
-      form.append("clientId", clientId);
-      form.append("viewId", viewId);
-      form.append("rootFolder", finalRoot);
+      form.append(
+        "clientId",
+        clientId,
+      );
+
+      form.append(
+        "viewId",
+        viewId,
+      );
+
+      form.append(
+        "datasetTypeId",
+        datasetTypeId,
+      );
+
+      form.append(
+        "rootFolder",
+        finalRoot,
+      );
 
       form.append(
         "relativePaths",
-        JSON.stringify(relativePaths),
+        JSON.stringify(
+          relativePaths,
+        ),
       );
 
-      for (const file of validFiles) {
+      for (
+        let index = 0;
+        index < validFiles.length;
+        index++
+      ) {
+        const file =
+          validFiles[index];
+
+        const relativePath =
+          relativePaths[index];
+
         form.append(
           "files",
           file,
-          file.name,
+          relativePath,
         );
       }
 
-      const result = await api<UploadResult>(
-        "/api/upload",
-        {
-          method: "POST",
-          body: form,
-        },
+      const result =
+        await api<UploadResult>(
+          "/api/upload",
+          {
+            method: "POST",
+            body: form,
+          },
+        );
+
+      setUploadResult(
+        result,
       );
 
-      setUploadResult(result);
       setMessage(
         "Dataset uploaded successfully.",
       );
@@ -654,127 +965,133 @@ export default function UploadPage() {
     }
   }
 
-  function getSelectedRoot(
-    selectedFiles: BrowserFile[],
-  ) {
-    const roots = new Set<string>();
+  const selectedDatasetType =
+    datasetTypes.find(
+      (item) =>
+        item.id ===
+        datasetTypeId,
+    );
 
-    for (const file of selectedFiles) {
-      const root = getRootFolder(
-        getRelativePath(file),
-      );
-
-      if (root) {
-        roots.add(root);
-      }
+  const closeModal = () => {
+    if (
+      scanning ||
+      uploading
+    ) {
+      return;
     }
 
-    return roots.size === 1
-      ? Array.from(roots)[0]
-      : "";
-  }
+    setModalOpen(false);
+    resetDataset();
+  };
+
+  const canOpenUpload =
+    !loadingClients &&
+    !loadingDatasetTypes &&
+    !scanning;
 
   return (
-    <main className="min-h-[calc(100vh-2rem)] p-4 md:p-6">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-8 flex items-start justify-between gap-6">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Upload Dataset
-            </h1>
+    <>
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        {...({
+          webkitdirectory: "",
+        } as Record<
+          string,
+          string
+        >)}
+        onChange={
+          handleFolderSelect
+        }
+        className="hidden"
+      />
 
-            <p className="mt-1 text-sm text-muted-foreground">
-              Select a complete dataset folder to
-              validate and upload.
-            </p>
-          </div>
+      {sourceOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-background/40 backdrop-blur-md"
+          onClick={() =>
+            setSourceOpen(false)
+          }
+        >
+          <div
+            className="fixed bottom-24 right-6 w-[460px] overflow-hidden rounded-2xl border bg-card shadow-2xl"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+            <div className="flex items-center justify-between border-b px-5 py-4">
+              <div>
+                <p className="text-sm font-semibold">
+                  Upload Dataset
+                </p>
 
-          {files.length > 0 && (
-            <button
-              type="button"
-              onClick={resetDataset}
-              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-accent"
-            >
-              <X className="size-4" />
-              Clear
-            </button>
-          )}
-        </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Choose where the dataset is located
+                </p>
+              </div>
 
-        {error && !modalOpen && (
-          <div className="mb-5 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-            {error}
-          </div>
-        )}
-
-        {message && !modalOpen && (
-          <div className="mb-5 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-primary">
-            {message}
-          </div>
-        )}
-
-        <section className="rounded-2xl border bg-card p-8">
-          <div className="flex min-h-105 flex-col items-center justify-center text-center">
-            <div className="mb-6 flex size-20 items-center justify-center rounded-2xl bg-primary/10">
-              <FolderOpen className="size-10 text-primary" />
+              <button
+                type="button"
+                onClick={() =>
+                  setSourceOpen(false)
+                }
+                className="rounded-lg p-2 hover:bg-accent"
+                aria-label="Close"
+              >
+                <X className="size-4" />
+              </button>
             </div>
 
-            <h2 className="text-lg font-semibold">
-              {folderName ||
-                "Choose a dataset folder"}
-            </h2>
+            <div className="grid grid-cols-2 gap-3 p-5">
+              <button
+                type="button"
+                onClick={openPcPicker}
+                disabled={!canOpenUpload}
+                className="group flex min-h-36 flex-col items-center justify-center rounded-xl border bg-background/50 px-5 text-center transition hover:border-primary hover:bg-primary/5 disabled:pointer-events-none disabled:opacity-50"
+              >
+                <FolderOpen className="size-8 text-primary transition-transform group-hover:scale-110" />
 
-            <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-              Select the complete folder containing
-              images and their YOLO TXT files. The
-              folder will be scanned automatically.
-            </p>
+                <span className="mt-3 text-sm font-semibold">
+                  Upload from PC
+                </span>
 
-            <input
-              ref={folderInputRef}
-              type="file"
-              multiple
-              {...({
-                webkitdirectory: "",
-              } as Record<string, string>)}
-              onChange={handleFolderSelect}
-              className="hidden"
-            />
+                <span className="mt-1 text-xs text-muted-foreground">
+                  Select a dataset folder
+                </span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() =>
-                folderInputRef.current?.click()
-              }
-              disabled={
-                loadingClients || scanning
-              }
-              className="mt-7 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-            >
-              {scanning ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <FolderOpen className="size-4" />
-              )}
+              <button
+                type="button"
+                onClick={() =>
+                  setSourceOpen(false)
+                }
+                className="group flex min-h-36 flex-col items-center justify-center rounded-xl border bg-background/50 px-5 text-center transition hover:border-primary hover:bg-primary/5"
+              >
+                <Server className="size-8 text-primary transition-transform group-hover:scale-110" />
 
-              {scanning
-                ? "Scanning..."
-                : "Choose Folder"}
-            </button>
+                <span className="mt-3 text-sm font-semibold">
+                  Upload from Server
+                </span>
 
-            {files.length > 0 && (
-              <p className="mt-4 text-xs text-muted-foreground">
-                {files.length.toLocaleString()} files
-                selected
+                <span className="mt-1 text-xs text-muted-foreground">
+                  Select an existing server dataset
+                </span>
+              </button>
+            </div>
+
+            <div className="border-t px-5 py-3">
+              <p className="text-xs text-muted-foreground">
+                Select a source to begin dataset upload.
               </p>
-            )}
+            </div>
           </div>
-        </section>
-      </div>
+        </div>
+      )}
 
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-md">
-          <div className="w-full max-w-3xl overflow-hidden rounded-2xl border bg-card shadow-2xl">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/70 p-4 backdrop-blur-md">
+          <div className="w-full max-w-4xl overflow-hidden rounded-2xl border bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b px-6 py-5">
               <div className="min-w-0">
                 <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -788,13 +1105,13 @@ export default function UploadPage() {
 
               <button
                 type="button"
-                onClick={() =>
-                  setModalOpen(false)
-                }
+                onClick={closeModal}
                 disabled={
-                  scanning || uploading
+                  scanning ||
+                  uploading
                 }
                 className="rounded-lg p-2 hover:bg-accent disabled:opacity-50"
+                aria-label="Close dataset"
               >
                 <X className="size-5" />
               </button>
@@ -810,8 +1127,7 @@ export default function UploadPage() {
                   </p>
 
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Checking images, TXT files and
-                    matching pairs...
+                    Checking images, TXT files and matching pairs...
                   </p>
                 </div>
               ) : scanResult ? (
@@ -819,7 +1135,9 @@ export default function UploadPage() {
                   <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                     <Stat
                       label="Total files"
-                      value={scanResult.files}
+                      value={
+                        scanResult.files
+                      }
                       icon={
                         <Files className="size-4 text-muted-foreground" />
                       }
@@ -827,7 +1145,9 @@ export default function UploadPage() {
 
                     <Stat
                       label="Total images"
-                      value={scanResult.images}
+                      value={
+                        scanResult.images
+                      }
                       icon={
                         <ImageIcon className="size-4 text-muted-foreground" />
                       }
@@ -835,7 +1155,9 @@ export default function UploadPage() {
 
                     <Stat
                       label="Total TXT"
-                      value={scanResult.txt}
+                      value={
+                        scanResult.txt
+                      }
                       icon={
                         <FileText className="size-4 text-muted-foreground" />
                       }
@@ -843,7 +1165,9 @@ export default function UploadPage() {
 
                     <Stat
                       label="Valid pairs"
-                      value={scanResult.validPairs}
+                      value={
+                        scanResult.validPairs
+                      }
                       tone="success"
                       icon={
                         <CheckCircle2 className="size-4 text-primary" />
@@ -862,7 +1186,9 @@ export default function UploadPage() {
 
                     <Stat
                       label="Corrupted TXT"
-                      value={scanResult.corruptedTxt}
+                      value={
+                        scanResult.corruptedTxt
+                      }
                       tone={
                         scanResult.corruptedTxt
                           ? "danger"
@@ -896,7 +1222,7 @@ export default function UploadPage() {
                   </div>
 
                   <div
-                    className={`rounded-xl border p-1 ${
+                    className={`rounded-xl border p-4 ${
                       scanResult.canUpload
                         ? "border-primary/30 bg-primary/5"
                         : "border-destructive/30 bg-destructive/5"
@@ -926,7 +1252,8 @@ export default function UploadPage() {
                   </div>
 
                   {!scanResult.canUpload &&
-                    scanResult.errors.length > 0 && (
+                    scanResult.errors
+                      .length > 0 && (
                       <div className="rounded-xl border p-4">
                         <div className="mb-3 flex items-center justify-between">
                           <p className="text-sm font-semibold">
@@ -934,32 +1261,48 @@ export default function UploadPage() {
                           </p>
 
                           <span className="text-xs text-muted-foreground">
-                            {scanResult.errors.length}{" "}
+                            {
+                              scanResult
+                                .errors
+                                .length
+                            }{" "}
                             files
                           </span>
                         </div>
 
                         <div className="max-h-36 space-y-1.5 overflow-y-auto">
                           {scanResult.errors
-                            .slice(0, 30)
-                            .map((item, index) => (
-                              <div
-                                key={`${item.file}-${index}`}
-                                className="flex gap-2 text-xs"
-                              >
-                                <span className="font-medium">
-                                  {item.message}
-                                </span>
+                            .slice(
+                              0,
+                              30,
+                            )
+                            .map(
+                              (
+                                item,
+                                index,
+                              ) => (
+                                <div
+                                  key={`${item.file}-${index}`}
+                                  className="flex gap-2 text-xs"
+                                >
+                                  <span className="font-medium">
+                                    {
+                                      item.message
+                                    }
+                                  </span>
 
-                                <span className="truncate text-muted-foreground">
-                                  {item.file}
-                                </span>
-                              </div>
-                            ))}
+                                  <span className="truncate text-muted-foreground">
+                                    {
+                                      item.file
+                                    }
+                                  </span>
+                                </div>
+                              ),
+                            )}
                         </div>
 
-                        {scanResult.errors.length >
-                          30 && (
+                        {scanResult.errors
+                          .length > 30 && (
                           <p className="mt-2 text-xs text-muted-foreground">
                             Showing first 30 issues.
                           </p>
@@ -967,7 +1310,7 @@ export default function UploadPage() {
                       </div>
                     )}
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4 md:grid-cols-3">
                     <div className="rounded-xl border p-4">
                       <p className="text-xs text-muted-foreground">
                         Client
@@ -986,14 +1329,22 @@ export default function UploadPage() {
                           Select client
                         </option>
 
-                        {clients.map((client) => (
-                          <option
-                            key={client.id}
-                            value={client.id}
-                          >
-                            {client.name}
-                          </option>
-                        ))}
+                        {clients.map(
+                          (client) => (
+                            <option
+                              key={
+                                client.id
+                              }
+                              value={
+                                client.id
+                              }
+                            >
+                              {
+                                client.name
+                              }
+                            </option>
+                          ),
+                        )}
                       </select>
                     </div>
 
@@ -1009,7 +1360,9 @@ export default function UploadPage() {
                             event.target.value,
                           )
                         }
-                        disabled={!clientId}
+                        disabled={
+                          !clientId
+                        }
                         className="mt-2 w-full rounded-lg border bg-background px-3 py-2 text-sm disabled:opacity-50"
                       >
                         <option value="">
@@ -1018,15 +1371,77 @@ export default function UploadPage() {
                             : "Select client first"}
                         </option>
 
-                        {views.map((view) => (
-                          <option
-                            key={view.id}
-                            value={view.id}
-                          >
-                            {view.name}
-                          </option>
-                        ))}
+                        {views.map(
+                          (view) => (
+                            <option
+                              key={
+                                view.id
+                              }
+                              value={
+                                view.id
+                              }
+                            >
+                              {
+                                view.name
+                              }
+                            </option>
+                          ),
+                        )}
                       </select>
+                    </div>
+
+                    <div className="rounded-xl border p-4">
+                      <p className="text-xs text-muted-foreground">
+                        Dataset type
+                      </p>
+
+                      <select
+                        value={
+                          datasetTypeId
+                        }
+                        onChange={(event) =>
+                          setDatasetTypeId(
+                            event.target.value,
+                          )
+                        }
+                        disabled={
+                          loadingDatasetTypes
+                        }
+                        className="mt-2 w-full rounded-lg border bg-background px-3 py-2 text-sm disabled:opacity-50"
+                      >
+                        <option value="">
+                          {loadingDatasetTypes
+                            ? "Loading dataset types..."
+                            : "Select dataset type"}
+                        </option>
+
+                        {datasetTypes.map(
+                          (
+                            datasetType,
+                          ) => (
+                            <option
+                              key={
+                                datasetType.id
+                              }
+                              value={
+                                datasetType.id
+                              }
+                            >
+                              {
+                                datasetType.name
+                              }
+                            </option>
+                          ),
+                        )}
+                      </select>
+
+                      {selectedDatasetType?.description && (
+                        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                          {
+                            selectedDatasetType.description
+                          }
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1042,7 +1457,9 @@ export default function UploadPage() {
 
                       <div className="mt-3 flex gap-2">
                         <input
-                          value={renameFolder}
+                          value={
+                            renameFolder
+                          }
                           onChange={(event) =>
                             setRenameFolder(
                               event.target.value,
@@ -1076,17 +1493,23 @@ export default function UploadPage() {
                       <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
                         <Stat
                           label="Uploaded"
-                          value={uploadResult.uploaded}
+                          value={
+                            uploadResult.uploaded
+                          }
                         />
 
                         <Stat
                           label="Merged"
-                          value={uploadResult.merged}
+                          value={
+                            uploadResult.merged
+                          }
                         />
 
                         <Stat
                           label="Skipped"
-                          value={uploadResult.skipped}
+                          value={
+                            uploadResult.skipped
+                          }
                         />
 
                         <Stat
@@ -1114,10 +1537,10 @@ export default function UploadPage() {
                   <div className="flex items-center justify-end gap-3 border-t pt-5">
                     <button
                       type="button"
-                      onClick={() =>
-                        setModalOpen(false)
+                      onClick={closeModal}
+                      disabled={
+                        uploading
                       }
-                      disabled={uploading}
                       className="rounded-xl border px-4 py-2.5 text-sm hover:bg-accent disabled:opacity-50"
                     >
                       Close
@@ -1133,7 +1556,8 @@ export default function UploadPage() {
                           uploading ||
                           !scanResult.canUpload ||
                           !clientId ||
-                          !viewId
+                          !viewId ||
+                          !datasetTypeId
                         }
                         className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
                       >
@@ -1167,6 +1591,24 @@ export default function UploadPage() {
           </div>
         </div>
       )}
-    </main>
+
+      <button
+        type="button"
+        onClick={() =>
+          setSourceOpen(
+            (value) => !value,
+          )
+        }
+        className="fixed bottom-6 right-6 z-50 flex size-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition hover:scale-105 hover:bg-primary/90"
+        aria-label="Upload dataset"
+        aria-expanded={sourceOpen}
+      >
+        {sourceOpen ? (
+          <X className="size-6" />
+        ) : (
+          <Plus className="size-6" />
+        )}
+      </button>
+    </>
   );
 }

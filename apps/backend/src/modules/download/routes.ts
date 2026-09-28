@@ -2,39 +2,58 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+
+import type {
+  FastifyInstance,
+  FastifyRequest,
+} from "fastify";
+
 import { z } from "zod";
+
 import { env } from "../../config/env.js";
 import { db } from "../../db/client.js";
+
 import {
   getMetadataImagePath,
   getMetadataLabelPath,
 } from "../../storage/paths.js";
+
 import { requireRole } from "../auth/guard.js";
 
-const require = createRequire(import.meta.url);
+const require = createRequire(
+  import.meta.url,
+);
+
 const archiver = require("archiver");
 
 const treeQuerySchema = z.object({
-  scope: z.enum(["metadata", "raw"]),
+  scope: z.enum([
+    "metadata",
+    "raw",
+  ]),
   path: z.string().default(""),
 });
 
 const fileQuerySchema = z.object({
-  scope: z.enum(["metadata", "raw"]),
+  scope: z.enum([
+    "metadata",
+    "raw",
+  ]),
   path: z.string().min(1),
   download: z
     .string()
     .optional()
     .transform(
       (value) =>
-        value === "1" || value === "true",
+        value === "1" ||
+        value === "true",
     ),
 });
 
-const annotationQuerySchema = z.object({
-  name: z.string().min(1),
-});
+const annotationQuerySchema =
+  z.object({
+    name: z.string().min(1),
+  });
 
 const downloadSchema = z.object({
   clientId: z.string().uuid(),
@@ -45,10 +64,44 @@ const downloadSchema = z.object({
   ]),
 });
 
+const metadataDownloadSchema =
+  z.object({
+    client: z
+      .string()
+      .trim()
+      .optional()
+      .default(""),
+
+    view: z
+      .string()
+      .trim()
+      .optional()
+      .default(""),
+
+    name: z
+      .string()
+      .trim()
+      .optional()
+      .default(""),
+
+    classes: z
+      .string()
+      .trim()
+      .optional()
+      .default(""),
+
+    datasetTypeId: z
+      .string()
+      .uuid()
+      .optional(),
+  });
+
 type TreeItem = {
   name: string;
   path: string;
-  type: "file" | "directory";
+  type:
+    | "file"
+    | "directory";
   size?: number;
   extension?: string;
 };
@@ -59,6 +112,29 @@ type RequestWithUser =
       role?: string;
     };
   };
+
+type MetadataAnnotation = {
+  class_name: string;
+  center_x: number;
+  center_y: number;
+  width: number;
+  height: number;
+};
+
+type MetadataDownloadRow = {
+  id: string;
+  client_name: string;
+  view_name: string;
+  name: string;
+  annotations:
+    | MetadataAnnotation[]
+    | null;
+};
+
+type DatasetClassRow = {
+  class_id: number;
+  class_name: string;
+};
 
 function getRequestRole(
   request: FastifyRequest,
@@ -164,7 +240,9 @@ async function getClient(
 
 function getScopeRoot(
   clientName: string,
-  scope: "metadata" | "raw",
+  scope:
+    | "metadata"
+    | "raw",
 ) {
   return path.join(
     env.DATA_ROOT,
@@ -175,7 +253,9 @@ function getScopeRoot(
 
 async function scopeExists(
   clientName: string,
-  scope: "metadata" | "raw",
+  scope:
+    | "metadata"
+    | "raw",
 ) {
   try {
     const stat =
@@ -256,7 +336,8 @@ async function getContentType(
       "text/csv; charset=utf-8",
     ".xml":
       "application/xml; charset=utf-8",
-    ".pdf": "application/pdf",
+    ".pdf":
+      "application/pdf",
   };
 
   return (
@@ -364,6 +445,421 @@ function joinRelativePath(
     : child;
 }
 
+function parseClassFilter(
+  value: string,
+) {
+  return Array.from(
+    new Set(
+      value
+        .split(",")
+        .map(
+          (item) =>
+            item.trim(),
+        )
+        .filter(Boolean),
+    ),
+  );
+}
+
+function isMetadataAnnotation(
+  value: unknown,
+): value is MetadataAnnotation {
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
+    return false;
+  }
+
+  const annotation =
+    value as Partial<MetadataAnnotation>;
+
+  return (
+    typeof annotation.class_name ===
+      "string" &&
+    typeof annotation.center_x ===
+      "number" &&
+    typeof annotation.center_y ===
+      "number" &&
+    typeof annotation.width ===
+      "number" &&
+    typeof annotation.height ===
+      "number"
+  );
+}
+
+function normalizeMetadataAnnotations(
+  value: unknown,
+) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    isMetadataAnnotation,
+  );
+}
+
+function sanitizeArchiveSegment(
+  value: string,
+) {
+  return (
+    value
+      .replaceAll("\\", "_")
+      .replaceAll("/", "_")
+      .replaceAll("..", "_")
+      .replaceAll(
+        /[<>:"|?*\x00-\x1f]/g,
+        "_",
+      )
+      .trim() ||
+    "unknown"
+  );
+}
+
+function sanitizeArchiveFileName(
+  value: string,
+) {
+  const basename =
+    path.basename(value);
+
+  return sanitizeArchiveSegment(
+    basename,
+  );
+}
+
+function createLabelContent(
+  annotations: MetadataAnnotation[],
+  classMap: Map<
+    string,
+    number
+  >,
+) {
+  const lines: string[] = [];
+
+  for (const annotation of annotations) {
+    const classId =
+      classMap.get(
+        annotation.class_name,
+      );
+
+    if (
+      classId === undefined
+    ) {
+      continue;
+    }
+
+    lines.push(
+      [
+        classId,
+        annotation.center_x,
+        annotation.center_y,
+        annotation.width,
+        annotation.height,
+      ]
+        .map(String)
+        .join(" "),
+    );
+  }
+
+  return lines.length > 0
+    ? `${lines.join("\n")}\n`
+    : "";
+}
+
+async function getFilteredMetadata(
+  query: z.infer<
+    typeof metadataDownloadSchema
+  >,
+) {
+  const classNames =
+    parseClassFilter(
+      query.classes,
+    );
+
+  const values: unknown[] = [];
+
+  const conditions: string[] = [];
+
+  if (query.client) {
+    values.push(query.client);
+    conditions.push(
+      `c.name = $${values.length}`,
+    );
+  }
+
+  if (query.view) {
+    values.push(query.view);
+    conditions.push(
+      `v.name = $${values.length}`,
+    );
+  }
+
+  if (query.name) {
+    values.push(
+      `%${query.name}%`,
+    );
+    conditions.push(
+      `m.name ILIKE $${values.length}`,
+    );
+  }
+
+  if (classNames.length > 0) {
+    values.push(classNames);
+    conditions.push(`
+      EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(m.annotations) = 'array'
+            THEN m.annotations
+            ELSE '[]'::jsonb
+          END
+        ) AS annotation
+        WHERE annotation->>'class_name' = ANY($${values.length}::text[])
+      )
+    `);
+  }
+
+  const whereClause =
+    conditions.length > 0
+      ? `WHERE ${conditions.join(
+          "\nAND ",
+        )}`
+      : "";
+
+  const result =
+    await db.query(
+      `
+        SELECT
+          m.id,
+          c.name AS client_name,
+          v.name AS view_name,
+          m.name,
+          m.annotations
+        FROM metadata m
+        INNER JOIN clients c
+          ON c.id = m.client_id
+        INNER JOIN views v
+          ON v.id = m.view_id
+        ${whereClause}
+        ORDER BY
+          c.name,
+          v.name,
+          m.name
+      `,
+      values,
+    );
+
+  return {
+    rows:
+      result.rows as MetadataDownloadRow[],
+    classNames,
+  };
+}
+
+async function getDatasetType(
+  datasetTypeId: string,
+) {
+  const result =
+    await db.query(
+      `
+        SELECT
+          id,
+          name
+        FROM dataset_types
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [datasetTypeId],
+    );
+
+  return result.rows[0] as
+    | {
+        id: string;
+        name: string;
+      }
+    | undefined;
+}
+
+async function getDatasetClassMap(
+  datasetTypeId: string,
+) {
+  const result =
+    await db.query(
+      `
+        SELECT
+          class_id,
+          class_name
+        FROM dataset_type_classes
+        WHERE dataset_type_id = $1
+        ORDER BY class_id
+      `,
+      [datasetTypeId],
+    );
+
+  const map =
+    new Map<
+      string,
+      number
+    >();
+
+  for (
+    const row of result.rows as DatasetClassRow[]
+  ) {
+    map.set(
+      row.class_name,
+      Number(row.class_id),
+    );
+  }
+
+  return map;
+}
+
+function getExportAnnotations(
+  annotations: MetadataAnnotation[],
+  classFilter: string[],
+) {
+  if (
+    classFilter.length === 0
+  ) {
+    return annotations;
+  }
+
+  const selected =
+    new Set(classFilter);
+
+  return annotations.filter(
+    (annotation) =>
+      selected.has(
+        annotation.class_name,
+      ),
+  );
+}
+
+async function appendImageToArchive(
+  archive: any,
+  clientName: string,
+  viewName: string,
+  imageName: string,
+) {
+  const imagePath =
+    getMetadataImagePath(
+      clientName,
+      imageName,
+    );
+
+  try {
+    const stat =
+      await fsp.stat(
+        imagePath,
+      );
+
+    if (!stat.isFile()) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  const safeView =
+    sanitizeArchiveSegment(
+      viewName,
+    );
+
+  const safeName =
+    sanitizeArchiveFileName(
+      imageName,
+    );
+
+  archive.file(
+    imagePath,
+    {
+      name: `images/${safeView}/${safeName}`,
+    },
+  );
+
+  return true;
+}
+
+async function appendDatasetEntry(
+  archive: any,
+  clientName: string,
+  viewName: string,
+  imageName: string,
+  annotations: MetadataAnnotation[],
+  classMap: Map<
+    string,
+    number
+  >,
+  classFilter: string[],
+) {
+  const imagePath =
+    getMetadataImagePath(
+      clientName,
+      imageName,
+    );
+
+  try {
+    const stat =
+      await fsp.stat(
+        imagePath,
+      );
+
+    if (!stat.isFile()) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+
+  const filteredAnnotations =
+    getExportAnnotations(
+      annotations,
+      classFilter,
+    );
+
+  const labelContent =
+    createLabelContent(
+      filteredAnnotations,
+      classMap,
+    );
+
+  const safeView =
+    sanitizeArchiveSegment(
+      viewName,
+    );
+
+  const safeImageName =
+    sanitizeArchiveFileName(
+      imageName,
+    );
+
+  const stem =
+    path.basename(
+      safeImageName,
+      path.extname(
+        safeImageName,
+      ),
+    );
+
+  archive.file(
+    imagePath,
+    {
+      name: `images/${safeView}/${safeImageName}`,
+    },
+  );
+
+  archive.append(
+    labelContent,
+    {
+      name: `labels/${safeView}/${stem}.txt`,
+    },
+  );
+
+  return true;
+}
+
 export async function registerDownloadRoutes(
   app: FastifyInstance,
 ) {
@@ -389,10 +885,12 @@ export async function registerDownloadRoutes(
 
       const clients = [];
 
-      for (const client of clientsResult.rows as {
-        id: string;
-        name: string;
-      }[]) {
+      for (
+        const client of clientsResult.rows as {
+          id: string;
+          name: string;
+        }[]
+      ) {
         const metadataRoot =
           getScopeRoot(
             client.name,
@@ -873,6 +1371,7 @@ export async function registerDownloadRoutes(
           request.log.error(
             error,
           );
+
           archive.destroy(
             error,
           );
@@ -883,12 +1382,14 @@ export async function registerDownloadRoutes(
         reply.raw,
       );
 
-      for (const row of metadataResult.rows as {
-        name: string;
-        image_hash:
-          | string
-          | null;
-      }[]) {
+      for (
+        const row of metadataResult.rows as {
+          name: string;
+          image_hash:
+            | string
+            | null;
+        }[]
+      ) {
         if (
           params.type ===
             "images" ||
@@ -945,6 +1446,275 @@ export async function registerDownloadRoutes(
             );
           } catch {}
         }
+      }
+
+      await archive.finalize();
+    },
+  );
+
+  app.get(
+    "/api/metadata-download/images",
+    {
+      preHandler: requireRole(
+        "admin",
+        "editor",
+        "viewer",
+      ),
+    },
+    async (
+      request,
+      reply,
+    ) => {
+      const query =
+        metadataDownloadSchema.parse(
+          request.query,
+        );
+
+      const {
+        rows,
+      } =
+        await getFilteredMetadata(
+          query,
+        );
+
+      if (rows.length === 0) {
+        return reply
+          .code(404)
+          .send({
+            message:
+              "No metadata matched the selected filters.",
+          });
+      }
+
+      const archive =
+        archiver("zip", {
+          zlib: {
+            level: 6,
+          },
+        });
+
+      const filename =
+        "metadata-images.zip";
+
+      reply.header(
+        "Content-Type",
+        "application/zip",
+      );
+
+      reply.header(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`,
+      );
+
+      reply.header(
+        "Cache-Control",
+        "private, no-store",
+      );
+
+      archive.on(
+        "error",
+        (error: Error) => {
+          request.log.error(
+            error,
+          );
+
+          archive.destroy(
+            error,
+          );
+        },
+      );
+
+      archive.pipe(
+        reply.raw,
+      );
+
+      let addedCount = 0;
+
+      for (const row of rows) {
+        const added =
+          await appendImageToArchive(
+            archive,
+            row.client_name,
+            row.view_name,
+            row.name,
+          );
+
+        if (added) {
+          addedCount++;
+        }
+      }
+
+      if (addedCount === 0) {
+        archive.abort();
+
+        return reply
+          .code(404)
+          .send({
+            message:
+              "No image files were found for the selected metadata.",
+          });
+      }
+
+      await archive.finalize();
+    },
+  );
+
+  app.get(
+    "/api/metadata-download/dataset",
+    {
+      preHandler: requireRole(
+        "admin",
+        "editor",
+        "viewer",
+      ),
+    },
+    async (
+      request,
+      reply,
+    ) => {
+      const query =
+        metadataDownloadSchema.parse(
+          request.query,
+        );
+
+      if (
+        !query.datasetTypeId
+      ) {
+        return reply
+          .code(400)
+          .send({
+            message:
+              "Dataset type is required.",
+          });
+      }
+
+      const datasetType =
+        await getDatasetType(
+          query.datasetTypeId,
+        );
+
+      if (!datasetType) {
+        return reply
+          .code(404)
+          .send({
+            message:
+              "Dataset type not found.",
+          });
+      }
+
+      const classMap =
+        await getDatasetClassMap(
+          query.datasetTypeId,
+        );
+
+      if (
+        classMap.size === 0
+      ) {
+        return reply
+          .code(400)
+          .send({
+            message:
+              "The selected dataset type has no class mappings.",
+          });
+      }
+
+      const {
+        rows,
+        classNames,
+      } =
+        await getFilteredMetadata(
+          query,
+        );
+
+      if (rows.length === 0) {
+        return reply
+          .code(404)
+          .send({
+            message:
+              "No metadata matched the selected filters.",
+          });
+      }
+
+      const archive =
+        archiver("zip", {
+          zlib: {
+            level: 6,
+          },
+        });
+
+      const safeDatasetType =
+        sanitizeArchiveSegment(
+          datasetType.name,
+        );
+
+      const filename =
+        `metadata-${safeDatasetType}-dataset.zip`;
+
+      reply.header(
+        "Content-Type",
+        "application/zip",
+      );
+
+      reply.header(
+        "Content-Disposition",
+        `attachment; filename="${filename}"`,
+      );
+
+      reply.header(
+        "Cache-Control",
+        "private, no-store",
+      );
+
+      archive.on(
+        "error",
+        (error: Error) => {
+          request.log.error(
+            error,
+          );
+
+          archive.destroy(
+            error,
+          );
+        },
+      );
+
+      archive.pipe(
+        reply.raw,
+      );
+
+      let addedCount = 0;
+
+      for (const row of rows) {
+        const annotations =
+          normalizeMetadataAnnotations(
+            row.annotations,
+          );
+
+        const added =
+          await appendDatasetEntry(
+            archive,
+            row.client_name,
+            row.view_name,
+            row.name,
+            annotations,
+            classMap,
+            classNames,
+          );
+
+        if (added) {
+          addedCount++;
+        }
+      }
+
+      if (addedCount === 0) {
+        archive.abort();
+
+        return reply
+          .code(404)
+          .send({
+            message:
+              "No image files were found for the selected metadata.",
+          });
       }
 
       await archive.finalize();

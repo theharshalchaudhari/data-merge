@@ -10,7 +10,10 @@ const roleSchema = z.object({
 export async function registerUserRoutes(app: FastifyInstance) {
   app.get(
     "/api/users",
-    { preHandler: requireRole("admin") },
+    { preHandler: requireRole(
+      "admin",
+      "editor"
+    ) },
     async () => {
       const result = await db.query(`
         SELECT id, name, username, email, role, created_at, updated_at

@@ -3,10 +3,13 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
+
 import type { FastifyInstance } from "fastify";
+
 import {
   requireRole,
 } from "../auth/guard.js";
+
 import {
   uploadDataset,
 } from "./service.js";
@@ -14,15 +17,19 @@ import {
 function normalizeUploadPath(
   filename: string,
 ): string {
-  return filename.replaceAll("\\", "/");
+  return filename.replaceAll(
+    "\\",
+    "/",
+  );
 }
 
 function validateRelativePath(
   filename: string,
 ): string {
-  const normalized = normalizeUploadPath(
-    filename,
-  );
+  const normalized =
+    normalizeUploadPath(
+      filename,
+    );
 
   if (!normalized) {
     throw new Error(
@@ -31,19 +38,24 @@ function validateRelativePath(
   }
 
   if (normalized.includes("\0")) {
-    throw new Error("Invalid filename.");
+    throw new Error(
+      "Invalid filename.",
+    );
   }
 
   if (
     normalized.startsWith("/") ||
-    /^[A-Za-z]:\//.test(normalized)
+    /^[A-Za-z]:\//.test(
+      normalized,
+    )
   ) {
     throw new Error(
       "Absolute file paths are not allowed.",
     );
   }
 
-  const parts = normalized.split("/");
+  const parts =
+    normalized.split("/");
 
   if (
     parts.some(
@@ -73,7 +85,10 @@ function validateRelativePath(
 function parseRelativePaths(
   value: unknown,
 ): string[] {
-  if (typeof value !== "string" || !value) {
+  if (
+    typeof value !== "string" ||
+    !value
+  ) {
     throw new Error(
       "Upload relative path manifest is required.",
     );
@@ -95,19 +110,29 @@ function parseRelativePaths(
     );
   }
 
-  const paths = parsed.map((item) => {
-    if (typeof item !== "string") {
-      throw new Error(
-        "Invalid relative path in upload manifest.",
+  const paths = parsed.map(
+    (item) => {
+      if (
+        typeof item !== "string"
+      ) {
+        throw new Error(
+          "Invalid relative path in upload manifest.",
+        );
+      }
+
+      return validateRelativePath(
+        item,
       );
-    }
+    },
+  );
 
-    return validateRelativePath(item);
-  });
+  const uniquePaths =
+    new Set(paths);
 
-  const uniquePaths = new Set(paths);
-
-  if (uniquePaths.size !== paths.length) {
+  if (
+    uniquePaths.size !==
+    paths.length
+  ) {
     throw new Error(
       "Duplicate relative paths were found in the upload manifest.",
     );
@@ -127,7 +152,10 @@ export async function registerUploadRoutes(
         "editor",
       ),
     },
-    async (request, reply) => {
+    async (
+      request,
+      reply,
+    ) => {
       const stagingPath =
         await fsp.mkdtemp(
           path.join(
@@ -138,24 +166,33 @@ export async function registerUploadRoutes(
 
       let clientId = "";
       let viewId = "";
+      let datasetTypeId = "";
       let rootFolder = "";
-      let relativePaths: string[] | null =
-        null;
+      let relativePaths:
+        | string[]
+        | null = null;
+
       let fileCount = 0;
 
       try {
-        const parts = request.parts({
-          limits: {
-            files: 10000,
-            parts: 20000,
-          },
-        });
+        const parts =
+          request.parts({
+            limits: {
+              files: 10000,
+              parts: 20000,
+            },
+          });
 
-        for await (const part of parts) {
-          if (part.type === "field") {
-            const value = String(
-              part.value ?? "",
-            );
+        for await (
+          const part of parts
+        ) {
+          if (
+            part.type === "field"
+          ) {
+            const value =
+              String(
+                part.value ?? "",
+              );
 
             if (
               part.fieldname ===
@@ -169,6 +206,12 @@ export async function registerUploadRoutes(
               viewId = value;
             } else if (
               part.fieldname ===
+              "datasetTypeId"
+            ) {
+              datasetTypeId =
+                value;
+            } else if (
+              part.fieldname ===
               "rootFolder"
             ) {
               rootFolder = value;
@@ -177,7 +220,9 @@ export async function registerUploadRoutes(
               "relativePaths"
             ) {
               relativePaths =
-                parseRelativePaths(value);
+                parseRelativePaths(
+                  value,
+                );
             }
 
             continue;
@@ -199,10 +244,14 @@ export async function registerUploadRoutes(
           }
 
           const relativePath =
-            relativePaths[fileCount];
+            relativePaths[
+              fileCount
+            ];
 
           const stagingRoot =
-            path.resolve(stagingPath);
+            path.resolve(
+              stagingPath,
+            );
 
           const destination =
             path.resolve(
@@ -217,7 +266,10 @@ export async function registerUploadRoutes(
             );
 
           if (
-            relativeDestination === "" ||
+            relativeDestination ===
+              "" ||
+            relativeDestination ===
+              ".." ||
             relativeDestination.startsWith(
               `..${path.sep}`,
             ) ||
@@ -231,7 +283,9 @@ export async function registerUploadRoutes(
           }
 
           await fsp.mkdir(
-            path.dirname(destination),
+            path.dirname(
+              destination,
+            ),
             {
               recursive: true,
             },
@@ -257,48 +311,78 @@ export async function registerUploadRoutes(
         }
 
         if (!clientId) {
-          return reply.code(400).send({
-            message:
-              "Client is required.",
-          });
+          return reply
+            .code(400)
+            .send({
+              message:
+                "Client is required.",
+            });
         }
 
         if (!viewId) {
-          return reply.code(400).send({
-            message:
-              "View is required.",
-          });
+          return reply
+            .code(400)
+            .send({
+              message:
+                "View is required.",
+            });
+        }
+
+        if (!datasetTypeId) {
+          return reply
+            .code(400)
+            .send({
+              message:
+                "Dataset type is required.",
+            });
         }
 
         if (!rootFolder) {
-          return reply.code(400).send({
-            message:
-              "Dataset root folder is required.",
-          });
+          return reply
+            .code(400)
+            .send({
+              message:
+                "Dataset root folder is required.",
+            });
         }
 
         if (!relativePaths) {
-          return reply.code(400).send({
-            message:
-              "Upload relative path manifest is required.",
-          });
+          return reply
+            .code(400)
+            .send({
+              message:
+                "Upload relative path manifest is required.",
+            });
         }
 
         if (fileCount === 0) {
-          return reply.code(400).send({
-            message:
-              "No files were uploaded.",
-          });
+          return reply
+            .code(400)
+            .send({
+              message:
+                "No files were uploaded.",
+            });
         }
 
         if (
           fileCount !==
           relativePaths.length
         ) {
-          return reply.code(400).send({
-            message:
-              `Upload file count (${fileCount}) does not match the relative path manifest count (${relativePaths.length}).`,
-          });
+          return reply
+            .code(400)
+            .send({
+              message:
+                `Upload file count (${fileCount}) does not match the relative path manifest count (${relativePaths.length}).`,
+            });
+        }
+
+        if (!request.authUser) {
+          return reply
+            .code(401)
+            .send({
+              message:
+                "Authentication required.",
+            });
         }
 
         const result =
@@ -306,20 +390,30 @@ export async function registerUploadRoutes(
             stagingPath,
             clientId,
             viewId,
+            datasetTypeId,
             rootFolder,
+            uploadedBy:
+              request.authUser.id,
           });
 
-        return reply.send(result);
+        return reply.send(
+          result,
+        );
       } catch (error) {
-        request.log.error(error);
+        request.log.error(
+          error,
+        );
 
         const validationErrors =
           error &&
-          typeof error === "object" &&
-          "validationErrors" in error
+          typeof error ===
+            "object" &&
+          "validationErrors" in
+            error
             ? (
                 error as {
-                  validationErrors: unknown;
+                  validationErrors:
+                    unknown;
                 }
               ).validationErrors
             : undefined;
@@ -332,11 +426,14 @@ export async function registerUploadRoutes(
           )
           .send({
             message:
-              error instanceof Error
+              error instanceof
+              Error
                 ? error.message
                 : "Dataset upload failed.",
             ...(validationErrors
-              ? { validationErrors }
+              ? {
+                  validationErrors,
+                }
               : {}),
           });
       } finally {

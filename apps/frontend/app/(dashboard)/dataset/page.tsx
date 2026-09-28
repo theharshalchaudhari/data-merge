@@ -1087,16 +1087,13 @@ export default function DownloadPage() {
 
   return (
     <main className="min-h-screen p-4 md:p-6">
-      <div className="mx-auto max-w-7xl">
+      <div className="mx-auto">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold">
-              Data Explorer
+            <h1 className="text-3xl font-semibold">
+              Dataset Management
             </h1>
 
-            <p className="mt-1 text-sm text-muted-foreground">
-              Browse and download dataset files.
-            </p>
           </div>
 
           <button
@@ -1129,11 +1126,11 @@ export default function DownloadPage() {
         {!selectedClient ? (
           <section className="rounded-xl border bg-card p-6">
             <div className="mb-6">
-              <h2 className="text-sm font-semibold">
+              <h2 className="text-xl font-semibold">
                 Clients
               </h2>
 
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 text-xl text-muted-foreground">
                 Select a client to browse its data.
               </p>
             </div>

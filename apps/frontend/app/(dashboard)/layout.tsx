@@ -2,8 +2,14 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import {
+  usePathname,
+  useRouter,
+} from "next/navigation";
+
 import { useAuth } from "../../hooks/use-auth";
+import FloatingUpload from "@/components/floating-upload";
+import ThemeToggle from "@/components/theme-toggle";
 
 const links = [
   {
@@ -12,27 +18,19 @@ const links = [
   },
   {
     href: "/clients",
-    label: "Clients",
-  },
-  {
-    href: "/views",
-    label: "Views",
+    label: "Clients & Views",
   },
   {
     href: "/metadata",
     label: "Metadata",
   },
   {
-    href: "/upload",
-    label: "Upload",
-  },
-  {
     href: "/users",
     label: "Users",
   },
   {
-    href: "/download",
-    label: "Download",
+    href: "/dataset",
+    label: "Dataset",
   },
 ];
 
@@ -43,7 +41,12 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { user, loading, logout } = useAuth();
+
+  const {
+    user,
+    loading,
+    logout,
+  } = useAuth();
 
   useEffect(() => {
     if (!loading && !user) {
@@ -51,7 +54,12 @@ export default function DashboardLayout({
         `/login?next=${encodeURIComponent(pathname)}`,
       );
     }
-  }, [loading, user, router, pathname]);
+  }, [
+    loading,
+    user,
+    router,
+    pathname,
+  ]);
 
   if (loading) {
     return (
@@ -65,6 +73,10 @@ export default function DashboardLayout({
     return null;
   }
 
+  const canUpload =
+    user.role === "admin" ||
+    user.role === "editor";
+
   return (
     <div className="min-h-screen bg-background">
       <aside className="fixed inset-y-0 left-0 hidden w-64 border-r bg-card md:block">
@@ -72,6 +84,7 @@ export default function DashboardLayout({
           <h1 className="font-semibold">
             Data Manage
           </h1>
+
           <p className="mt-1 text-xs text-muted-foreground">
             Dataset management
           </p>
@@ -105,32 +118,42 @@ export default function DashboardLayout({
         </nav>
 
         <div className="absolute inset-x-0 bottom-0 border-t p-4">
-          <p className="truncate text-sm font-medium">
-            {user.name}
-          </p>
+          <ThemeToggle />
 
-          <p className="text-xs text-muted-foreground">
-            {user.role}
-          </p>
+          <div className="mt-4">
+            <p className="truncate text-sm font-medium">
+              {user.name}
+            </p>
 
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                await logout();
-              } finally {
-                router.replace("/login");
-              }
-            }}
-            className="mt-3 w-full rounded-lg border px-3 py-2 text-sm hover:bg-accent"
-          >
-            Sign out
-          </button>
+            <p className="text-xs text-muted-foreground">
+              {user.role}
+            </p>
+
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await logout();
+                } finally {
+                  router.replace(
+                    "/login",
+                  );
+                }
+              }}
+              className="mt-3 w-full rounded-lg border px-3 py-2 text-sm hover:bg-accent"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </aside>
 
       <div className="md:pl-64">
         {children}
+
+        {canUpload && (
+          <FloatingUpload />
+        )}
       </div>
     </div>
   );

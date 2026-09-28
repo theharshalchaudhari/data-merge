@@ -1,8 +1,13 @@
 import type {
   FastifyInstance,
 } from "fastify";
+
 import { z } from "zod";
-import { db } from "../../db/client.js";
+
+import {
+  db,
+} from "../../db/client.js";
+
 import {
   requireRole,
 } from "../auth/guard.js";
@@ -28,19 +33,6 @@ const querySchema = z.object({
   search: z
     .string()
     .optional(),
-
-  page: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(1),
-
-  limit: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(100)
-    .default(50),
 });
 
 export async function registerMetadataRoutes(
@@ -108,25 +100,10 @@ export async function registerMetadataRoutes(
 
       const where =
         conditions.length > 0
-          ? `WHERE ${conditions.join(" AND ")}`
+          ? `WHERE ${conditions.join(
+              " AND ",
+            )}`
           : "";
-
-      const count =
-        await db.query(
-          `
-          SELECT COUNT(*)::int AS total
-          FROM metadata m
-          ${where}
-          `,
-          values,
-        );
-
-      const total =
-        count.rows[0].total;
-
-      const offset =
-        (query.page - 1) *
-        query.limit;
 
       const result =
         await db.query(
@@ -152,17 +129,11 @@ export async function registerMetadataRoutes(
             ON v.id = m.view_id
           ${where}
           ORDER BY
+            c.name ASC,
+            v.name ASC,
             m.name ASC
-          LIMIT
-            $${values.length + 1}
-          OFFSET
-            $${values.length + 2}
           `,
-          [
-            ...values,
-            query.limit,
-            offset,
-          ],
+          values,
         );
 
       const classResult =
@@ -178,13 +149,10 @@ export async function registerMetadataRoutes(
 
       return {
         items: result.rows,
-        classes: classResult.rows,
-        page: query.page,
-        limit: query.limit,
-        total,
-        totalPages: Math.ceil(
-          total / query.limit,
-        ),
+        classes:
+          classResult.rows,
+        total:
+          result.rows.length,
       };
     },
   );

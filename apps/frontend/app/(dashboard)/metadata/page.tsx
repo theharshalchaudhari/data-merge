@@ -2,19 +2,22 @@
 
 import {
   Download,
+  ImageDown,
   Loader2,
   RefreshCw,
 } from "lucide-react";
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import * as XLSX from "xlsx";
+
 import { api } from "../../../lib/api";
 
 type Annotation = {
-  class_id: number;
+  class_name: string;
   center_x: number;
   center_y: number;
   width: number;
@@ -34,8 +37,6 @@ type MetadataRecord = {
   view_id?: string;
   annotation_type?: string;
   annotations?: Annotation[];
-  classes?: ClassMapping[];
-  view_classes?: ClassMapping[];
 };
 
 type MetadataListResponse = {
@@ -43,31 +44,67 @@ type MetadataListResponse = {
   classes?: ClassMapping[];
 };
 
+type DatasetClass = {
+  id: string;
+  dataset_type_id: string;
+  class_id: number;
+  class_name: string;
+};
+
+type DatasetType = {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  classes: DatasetClass[];
+};
+
+type DatasetTypeResponse =
+  | DatasetType[]
+  | {
+      items?: DatasetType[];
+    };
+
 type MetadataRow = {
+  client: string;
+  view: string;
+  name: string;
+  annotations: Annotation[];
+};
+
+type DisplayRow = {
   client: string;
   view: string;
   name: string;
   className: string;
   classId: string;
   label: string;
-  classIds: number[];
+  annotations: Annotation[];
 };
+
+type ModelOption = {
+  key: string;
+  label: string;
+  map: Map<string, number>;
+};
+
+const GLOBAL_MODEL_KEY = "__global__";
+
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:4000";
 
 function isAnnotation(
   value: unknown,
 ): value is Annotation {
-  if (
-    !value ||
-    typeof value !== "object"
-  ) {
+  if (!value || typeof value !== "object") {
     return false;
   }
 
-  const item =
-    value as Partial<Annotation>;
+  const item = value as Partial<Annotation>;
 
   return (
-    Number.isInteger(item.class_id) &&
+    typeof item.class_name === "string" &&
     typeof item.center_x === "number" &&
     typeof item.center_y === "number" &&
     typeof item.width === "number" &&
@@ -76,20 +113,29 @@ function isAnnotation(
 }
 
 function normalizeAnnotations(
-  annotations: unknown,
+  value: unknown,
 ): Annotation[] {
-  if (!Array.isArray(annotations)) {
+  if (!Array.isArray(value)) {
     return [];
   }
 
-  return annotations.filter(isAnnotation);
+  return value.filter(isAnnotation);
 }
 
-function createLabel(
+function createYoloLabel(
   annotation: Annotation,
-): string {
+  classMap: Map<string, number>,
+): string | null {
+  const classId = classMap.get(
+    annotation.class_name,
+  );
+
+  if (classId === undefined) {
+    return null;
+  }
+
   return [
-    annotation.class_id,
+    classId,
     annotation.center_x,
     annotation.center_y,
     annotation.width,
@@ -99,98 +145,72 @@ function createLabel(
     .join(" ");
 }
 
-function getClassMappings(
-  item: MetadataRecord,
-  globalClasses: ClassMapping[],
-): ClassMapping[] {
-  if (
-    Array.isArray(item.classes) &&
-    item.classes.length > 0
-  ) {
-    return item.classes;
+function getDatasetTypes(
+  response: DatasetTypeResponse,
+): DatasetType[] {
+  if (Array.isArray(response)) {
+    return response;
   }
 
-  if (
-    Array.isArray(item.view_classes) &&
-    item.view_classes.length > 0
-  ) {
-    return item.view_classes;
+  if (Array.isArray(response.items)) {
+    return response.items;
   }
 
-  return globalClasses;
+  return [];
 }
 
 function buildRows(
   data: MetadataListResponse | null,
 ): MetadataRow[] {
-  const result: MetadataRow[] = [];
+  return (data?.items ?? []).map((item) => ({
+    client: item.client_name ?? "—",
+    view: item.view_name ?? "—",
+    name: item.name,
+    annotations: normalizeAnnotations(
+      item.annotations,
+    ),
+  }));
+}
 
-  const globalClasses =
-    data?.classes ?? [];
+function createDownloadUrl(
+  endpoint: string,
+  filters: {
+    client: string;
+    view: string;
+    name: string;
+    classes: string[];
+    datasetTypeId: string;
+  },
+): string {
+  const query = new URLSearchParams();
 
-  for (const item of data?.items ?? []) {
-    const annotations =
-      normalizeAnnotations(
-        item.annotations,
-      );
-
-    const classMappings =
-      getClassMappings(
-        item,
-        globalClasses,
-      );
-
-    const classMap = new Map<
-      number,
-      string
-    >();
-
-    for (const mapping of classMappings) {
-      classMap.set(
-        Number(mapping.class_id),
-        mapping.class_name,
-      );
-    }
-
-    const classIds = Array.from(
-      new Set(
-        annotations.map(
-          (annotation) =>
-            annotation.class_id,
-        ),
-      ),
-    );
-
-    const classNames = classIds.map(
-      (classId) =>
-        classMap.get(classId) ??
-        `Class ${classId}`,
-    );
-
-    const labels = annotations
-      .map(createLabel)
-      .filter(Boolean);
-
-    result.push({
-      client:
-        item.client_name ?? "—",
-      view:
-        item.view_name ?? "—",
-      name: item.name,
-      className:
-        classNames.length > 0
-          ? classNames.join(", ")
-          : "—",
-      classId:
-        classIds.length > 0
-          ? classIds.join(", ")
-          : "—",
-      label: labels.join("\n"),
-      classIds,
-    });
+  if (filters.client) {
+    query.set("client", filters.client);
   }
 
-  return result;
+  if (filters.view) {
+    query.set("view", filters.view);
+  }
+
+  if (filters.name) {
+    query.set("name", filters.name);
+  }
+
+  if (filters.classes.length > 0) {
+    query.set(
+      "classes",
+      filters.classes.join(","),
+    );
+  }
+
+  if (filters.datasetTypeId) {
+    query.set(
+      "datasetTypeId",
+      filters.datasetTypeId,
+    );
+  }
+
+  return `${API_URL}${endpoint}?${query.toString()}`;
 }
 
 export default function MetadataPage() {
@@ -198,33 +218,62 @@ export default function MetadataPage() {
     useState<MetadataListResponse | null>(
       null,
     );
-
+  const [datasetTypes, setDatasetTypes] =
+    useState<DatasetType[]>([]);
   const [loading, setLoading] =
     useState(true);
-
   const [error, setError] =
     useState("");
-
   const [clientFilter, setClientFilter] =
     useState("");
-
   const [viewFilter, setViewFilter] =
     useState("");
-
-  const [classFilter, setClassFilter] =
+  const [nameFilter, setNameFilter] =
     useState("");
+  const [selectedClasses, setSelectedClasses] =
+    useState<string[]>([]);
+  const [selectedModelKey, setSelectedModelKey] =
+    useState(GLOBAL_MODEL_KEY);
+  const [classMenuOpen, setClassMenuOpen] =
+    useState(false);
+  const classMenuRef =
+    useRef<HTMLDivElement>(null);
 
   async function loadMetadata() {
     try {
       setLoading(true);
       setError("");
 
-      const result =
-        await api<MetadataListResponse>(
+      const [
+        metadataResult,
+        datasetTypeResult,
+      ] = await Promise.all([
+        api<MetadataListResponse>(
           "/api/metadata",
-        );
+        ),
+        api<DatasetTypeResponse>(
+          "/api/dataset-types",
+        ),
+      ]);
 
-      setData(result);
+      setData(metadataResult);
+
+      const types =
+        getDatasetTypes(datasetTypeResult);
+
+      setDatasetTypes(types);
+
+      if (
+        selectedModelKey !== GLOBAL_MODEL_KEY &&
+        !types.some(
+          (type) =>
+            type.id === selectedModelKey,
+        )
+      ) {
+        setSelectedModelKey(
+          GLOBAL_MODEL_KEY,
+        );
+      }
     } catch (value) {
       setError(
         value instanceof Error
@@ -240,93 +289,361 @@ export default function MetadataPage() {
     void loadMetadata();
   }, []);
 
+  useEffect(() => {
+    function handleOutsideClick(
+      event: MouseEvent,
+    ) {
+      if (
+        classMenuRef.current &&
+        !classMenuRef.current.contains(
+          event.target as Node,
+        )
+      ) {
+        setClassMenuOpen(false);
+      }
+    }
+
+    document.addEventListener(
+      "mousedown",
+      handleOutsideClick,
+    );
+
+    return () => {
+      document.removeEventListener(
+        "mousedown",
+        handleOutsideClick,
+      );
+    };
+  }, []);
+
   const rows = useMemo(
     () => buildRows(data),
     [data],
   );
 
-  const clients = useMemo(() => {
-    return Array.from(
-      new Set(
-        rows
-          .map((row) => row.client)
-          .filter(
-            (value) => value !== "—",
-          ),
-      ),
-    ).sort();
-  }, [rows]);
+  const globalClassMap = useMemo(() => {
+    const map = new Map<
+      string,
+      number
+    >();
 
-  const views = useMemo(() => {
-    return Array.from(
-      new Set(
-        rows
-          .filter(
-            (row) =>
-              !clientFilter ||
-              row.client === clientFilter,
-          )
-          .map((row) => row.view)
-          .filter(
-            (value) => value !== "—",
-          ),
-      ),
-    ).sort();
-  }, [rows, clientFilter]);
+    for (
+      const mapping of data?.classes ?? []
+    ) {
+      map.set(
+        mapping.class_name,
+        Number(mapping.class_id),
+      );
+    }
 
-  const classes = useMemo(() => {
-    const values = new Set<string>();
+    return map;
+  }, [data]);
 
-    for (const row of rows) {
-      if (row.className === "—") {
-        continue;
+  const modelOptions = useMemo<
+    ModelOption[]
+  >(() => {
+    const options: ModelOption[] = [];
+
+    options.push({
+      key: GLOBAL_MODEL_KEY,
+      label: "Default",
+      map: globalClassMap,
+    });
+
+    for (const datasetType of datasetTypes) {
+      const map = new Map<
+        string,
+        number
+      >();
+
+      for (
+        const mapping of datasetType.classes ??
+        []
+      ) {
+        map.set(
+          mapping.class_name,
+          Number(mapping.class_id),
+        );
       }
 
-      for (const className of row.className
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean)) {
+      options.push({
+        key: datasetType.id,
+        label: datasetType.name,
+        map,
+      });
+    }
+
+    return options;
+  }, [datasetTypes, globalClassMap]);
+
+  const selectedModel = useMemo(
+    () =>
+      modelOptions.find(
+        (option) =>
+          option.key === selectedModelKey,
+      ) ??
+      modelOptions[0] ??
+      {
+        key: GLOBAL_MODEL_KEY,
+        label: "Default",
+        map: globalClassMap,
+      },
+    [
+      modelOptions,
+      selectedModelKey,
+      globalClassMap,
+    ],
+  );
+
+  const clients = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          rows
+            .map((row) => row.client)
+            .filter(
+              (value) => value !== "—",
+            ),
+        ),
+      ).sort(),
+    [rows],
+  );
+
+  const views = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          rows
+            .filter(
+              (row) =>
+                !clientFilter ||
+                row.client === clientFilter,
+            )
+            .map((row) => row.view)
+            .filter(
+              (value) => value !== "—",
+            ),
+        ),
+      ).sort(),
+    [rows, clientFilter],
+  );
+
+  const classes = useMemo(
+    () =>
+      Array.from(
+        selectedModel.map.keys(),
+      ).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [selectedModel],
+  );
+
+  const allAnnotatedClasses = useMemo(
+    () => {
+      const values = new Set<string>();
+
+      for (const row of rows) {
+        for (
+          const annotation of row.annotations
+        ) {
+          if (annotation.class_name) {
+            values.add(
+              annotation.class_name,
+            );
+          }
+        }
+      }
+
+      return Array.from(values).sort(
+        (a, b) => a.localeCompare(b),
+      );
+    },
+    [rows],
+  );
+
+  const excludedClasses = useMemo(() => {
+    const values = new Set<string>();
+
+    for (
+      const className of allAnnotatedClasses
+    ) {
+      if (
+        !selectedModel.map.has(className)
+      ) {
         values.add(className);
       }
     }
 
-    return Array.from(values).sort();
-  }, [rows]);
+    return Array.from(values).sort(
+      (a, b) => a.localeCompare(b),
+    );
+  }, [
+    allAnnotatedClasses,
+    selectedModel,
+  ]);
 
-  const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
+  useEffect(() => {
+    setSelectedClasses((current) =>
+      current.filter((className) =>
+        classes.includes(className),
+      ),
+    );
+  }, [classes]);
+
+  const filteredRows = useMemo<
+    DisplayRow[]
+  >(() => {
+    const result: DisplayRow[] = [];
+
+    for (const row of rows) {
       if (
         clientFilter &&
         row.client !== clientFilter
       ) {
-        return false;
+        continue;
       }
 
       if (
         viewFilter &&
         row.view !== viewFilter
       ) {
-        return false;
+        continue;
       }
 
       if (
-        classFilter &&
-        !row.className
-          .split(",")
-          .map((value) => value.trim())
-          .includes(classFilter)
+        nameFilter &&
+        !row.name
+          .toLowerCase()
+          .includes(
+            nameFilter.toLowerCase(),
+          )
       ) {
-        return false;
+        continue;
       }
 
-      return true;
-    });
+      const availableAnnotations =
+        row.annotations.filter(
+          (annotation) =>
+            selectedModel.map.has(
+              annotation.class_name,
+            ),
+        );
+
+      if (
+        availableAnnotations.length === 0
+      ) {
+        continue;
+      }
+
+      const annotations =
+        selectedClasses.length === 0
+          ? availableAnnotations
+          : availableAnnotations.filter(
+              (annotation) =>
+                selectedClasses.includes(
+                  annotation.class_name,
+                ),
+            );
+
+      if (
+        selectedClasses.length > 0 &&
+        annotations.length === 0
+      ) {
+        continue;
+      }
+
+      const classNames = Array.from(
+        new Set(
+          annotations.map(
+            (annotation) =>
+              annotation.class_name,
+          ),
+        ),
+      );
+
+      const classIds = Array.from(
+        new Set(
+          annotations
+            .map((annotation) =>
+              selectedModel.map.get(
+                annotation.class_name,
+              ),
+            )
+            .filter(
+              (
+                value,
+              ): value is number =>
+                value !== undefined,
+            ),
+        ),
+      );
+
+      const labels = annotations
+        .map((annotation) =>
+          createYoloLabel(
+            annotation,
+            selectedModel.map,
+          ),
+        )
+        .filter(
+          (value): value is string =>
+            value !== null,
+        );
+
+      if (labels.length === 0) {
+        continue;
+      }
+
+      result.push({
+        client: row.client,
+        view: row.view,
+        name: row.name,
+        className:
+          classNames.length > 0
+            ? classNames.join(", ")
+            : "—",
+        classId:
+          classIds.length > 0
+            ? classIds.join(", ")
+            : "—",
+        label: labels.join("\n"),
+        annotations,
+      });
+    }
+
+    return result;
   }, [
     rows,
     clientFilter,
     viewFilter,
-    classFilter,
+    nameFilter,
+    selectedClasses,
+    selectedModel,
   ]);
+
+  const classFilterLabel =
+    selectedClasses.length === 0
+      ? "All classes"
+      : selectedClasses.length === 1
+        ? selectedClasses[0]
+        : `${selectedClasses.length} classes`;
+
+  function toggleClass(
+    className: string,
+  ) {
+    setSelectedClasses((current) =>
+      current.includes(className)
+        ? current.filter(
+            (value) =>
+              value !== className,
+          )
+        : [...current, className],
+    );
+  }
+
+  function clearClasses() {
+    setSelectedClasses([]);
+  }
 
   function downloadExcel() {
     const worksheet =
@@ -365,21 +682,55 @@ export default function MetadataPage() {
     );
   }
 
+  function downloadImages() {
+    const url = createDownloadUrl(
+      "/api/metadata-download/images",
+      {
+        client: clientFilter,
+        view: viewFilter,
+        name: nameFilter,
+        classes: selectedClasses,
+        datasetTypeId:
+          selectedModelKey ===
+          GLOBAL_MODEL_KEY
+            ? ""
+            : selectedModelKey,
+      },
+    );
+
+    window.open(url, "_blank");
+  }
+
+  function downloadDataset() {
+    const url = createDownloadUrl(
+      "/api/metadata-download/dataset",
+      {
+        client: clientFilter,
+        view: viewFilter,
+        name: nameFilter,
+        classes: selectedClasses,
+        datasetTypeId:
+          selectedModelKey ===
+          GLOBAL_MODEL_KEY
+            ? ""
+            : selectedModelKey,
+      },
+    );
+
+    window.open(url, "_blank");
+  }
+
   return (
     <main className="min-h-screen p-4 md:p-6">
-      <div className="mx-auto max-w-7xl">
-        <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="mx-auto">
+        <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold">
+            <h1 className="text-3xl font-semibold">
               Metadata
             </h1>
-
-            <p className="mt-1 text-sm text-muted-foreground">
-              Annotation metadata and YOLO labels.
-            </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() =>
@@ -395,7 +746,6 @@ export default function MetadataPage() {
                     : "size-4"
                 }
               />
-
               Refresh
             </button>
 
@@ -409,14 +759,39 @@ export default function MetadataPage() {
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
             >
               <Download className="size-4" />
-
               Download Excel
+            </button>
+
+            <button
+              type="button"
+              onClick={downloadImages}
+              disabled={
+                loading ||
+                filteredRows.length === 0
+              }
+              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
+            >
+              <ImageDown className="size-4" />
+              Download Images
+            </button>
+
+            <button
+              type="button"
+              onClick={downloadDataset}
+              disabled={
+                loading ||
+                filteredRows.length === 0
+              }
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+            >
+              <Download className="size-4" />
+              Download Dataset
             </button>
           </div>
         </div>
 
         <section className="mb-5 rounded-xl border bg-card">
-          <div className="grid gap-3 p-4 md:grid-cols-3">
+          <div className="grid gap-3 p-4 md:grid-cols-5">
             <div>
               <label
                 htmlFor="client"
@@ -486,38 +861,194 @@ export default function MetadataPage() {
 
             <div>
               <label
-                htmlFor="class"
+                htmlFor="name"
                 className="mb-1.5 block text-xs font-medium text-muted-foreground"
               >
-                Class
+                Name
               </label>
 
-              <select
-                id="class"
-                value={classFilter}
+              <input
+                id="name"
+                type="text"
+                value={nameFilter}
                 onChange={(event) =>
-                  setClassFilter(
+                  setNameFilter(
                     event.target.value,
                   )
                 }
+                placeholder="Search by name"
+                className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
+              />
+            </div>
+
+            <div
+              ref={classMenuRef}
+              className="relative"
+            >
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                Class
+              </label>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setClassMenuOpen(
+                    (value) => !value,
+                  )
+                }
+                className="flex w-full items-center justify-between rounded-lg border bg-background px-3 py-2 text-left text-sm outline-none focus:ring-2 focus:ring-ring"
+              >
+                <span className="truncate">
+                  {classFilterLabel}
+                </span>
+
+                <span
+                  className={`ml-2 text-xs transition-transform ${
+                    classMenuOpen
+                      ? "rotate-180"
+                      : ""
+                  }`}
+                >
+                  ▲
+                </span>
+              </button>
+
+              {classMenuOpen && (
+                <div className="absolute left-0 right-0 z-50 mt-1 max-h-64 overflow-auto rounded-lg border bg-popover p-1 shadow-lg">
+                  <button
+                    type="button"
+                    onClick={clearClasses}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent"
+                  >
+                    <span
+                      className={`flex size-3.5 items-center justify-center rounded border ${
+                        selectedClasses.length ===
+                        0
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-input"
+                      }`}
+                    >
+                      {selectedClasses.length ===
+                        0 && "✓"}
+                    </span>
+
+                    <span>
+                      All classes
+                    </span>
+                  </button>
+
+                  {classes.map(
+                    (className) => {
+                      const checked =
+                        selectedClasses.includes(
+                          className,
+                        );
+
+                      return (
+                        <button
+                          key={className}
+                          type="button"
+                          onClick={() =>
+                            toggleClass(
+                              className,
+                            )
+                          }
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-accent"
+                        >
+                          <span
+                            className={`flex size-3.5 items-center justify-center rounded border ${
+                              checked
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-input"
+                            }`}
+                          >
+                            {checked && "✓"}
+                          </span>
+
+                          <span>
+                            {className}
+                          </span>
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="model-type"
+                className="mb-1.5 block text-xs font-medium text-muted-foreground"
+              >
+                Model Type
+              </label>
+
+              <select
+                id="model-type"
+                value={selectedModelKey}
+                onChange={(event) => {
+                  setSelectedModelKey(
+                    event.target.value,
+                  );
+                  setSelectedClasses([]);
+                }}
                 className="w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
               >
-                <option value="">
-                  All classes
-                </option>
-
-                {classes.map(
-                  (className) => (
+                {modelOptions.map(
+                  (option) => (
                     <option
-                      key={className}
-                      value={className}
+                      key={option.key}
+                      value={option.key}
                     >
-                      {className}
+                      {option.label}
                     </option>
                   ),
                 )}
               </select>
             </div>
+          </div>
+        </section>
+
+        <section className="mb-5 rounded-xl border bg-card">
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <div>
+              <p className="text-sm font-medium">
+                Classes excluded from{" "}
+                {selectedModel.label}
+              </p>
+
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                These classes remain in the
+                metadata source but are hidden
+                from rows and labels when they
+                are not available in the
+                selected model.
+              </p>
+            </div>
+
+            <span className="text-xs text-muted-foreground">
+              {excludedClasses.length} excluded
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-2 px-4 py-3">
+            {excludedClasses.length === 0 ? (
+              <span className="text-xs text-muted-foreground">
+                None
+              </span>
+            ) : (
+              excludedClasses.map(
+                (className) => (
+                  <span
+                    key={className}
+                    className="rounded-md border bg-muted px-2 py-1 text-xs"
+                  >
+                    {className}
+                  </span>
+                ),
+              )
+            )}
           </div>
         </section>
 
@@ -552,30 +1083,25 @@ export default function MetadataPage() {
             </div>
           ) : (
             <div className="max-h-[calc(100vh-18rem)] overflow-auto">
-              <table className="w-full min-w-225 text-sm">
-                <thead className="sticky top-0 z-10 border-b bg-muted">
+              <table className="w-full min-w-[900px] text-sm">
+                <thead className="sticky top-0 z-10 border-b bg-muted text-center">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">
                       Client
                     </th>
-
-                    <th className="px-4 py-3 text-left font-medium">
+                    <th className="min-w-[180px] px-4 py-3 text-left font-medium">
                       View
                     </th>
-
-                    <th className="px-4 py-3 text-left font-medium">
+                    <th className="w-[38%] min-w-[220px] px-4 py-3 text-left font-medium">
                       Name
                     </th>
-
-                    <th className="px-4 py-3 text-left font-medium">
+                    <th className="w-[1%] max-w-[10px] px-4 py-3 text-center font-medium">
                       Class Name
                     </th>
-
-                    <th className="px-4 py-3 text-left font-medium">
+                    <th className="w-[10%] min-w-[20px] text-center px-4 py-3 text-center font-medium">
                       Class ID
                     </th>
-
-                    <th className="px-4 py-3 text-left font-medium">
+                    <th className="w-[20%] min-w-[420px] px-4 py-3 text-left font-medium">
                       Label
                     </th>
                   </tr>
@@ -596,20 +1122,20 @@ export default function MetadataPage() {
                           {row.view}
                         </td>
 
-                        <td className="max-w-80 px-4 py-3">
+                        <td className="w-[38%] min-w-[420px] px-4 py-3">
                           <span
-                            className="block truncate"
+                            className="block break-all whitespace-normal"
                             title={row.name}
                           >
                             {row.name}
                           </span>
                         </td>
 
-                        <td className="px-4 py-3">
+                        <td className="w-[10%] px-4 text-center py-3  break-words">
                           {row.className}
                         </td>
 
-                        <td className="px-4 py-3 font-mono text-xs">
+                        <td className="px-4 py-3 font-mono text-center text-xs">
                           {row.classId}
                         </td>
 

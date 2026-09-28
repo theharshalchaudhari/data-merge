@@ -2,7 +2,9 @@ import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
+
 import { env } from "./config/env.js";
+
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerClientRoutes } from "./modules/clients/routes.js";
 import { registerDashboardRoutes } from "./modules/dashboard/routes.js";
@@ -11,11 +13,15 @@ import { registerMetadataRoutes } from "./modules/metadata/routes.js";
 import { registerUploadRoutes } from "./modules/upload/routes.js";
 import { registerUserRoutes } from "./modules/users/routes.js";
 import { registerViewRoutes } from "./modules/views/routes.js";
+import { registerDatasetRoutes } from "./modules/datasets/routes.js";
 
 export async function createApp() {
   const app = Fastify({
     logger: true,
-    bodyLimit: env.MAX_UPLOAD_SIZE_MB * 1024 * 1024,
+    bodyLimit:
+      env.MAX_UPLOAD_SIZE_MB *
+      1024 *
+      1024,
   });
 
   await app.register(cors, {
@@ -40,23 +46,30 @@ export async function createApp() {
   });
 
   await app.register(cookie, {
-    secret: env.SESSION_SECRET,
+    secret:
+      env.SESSION_SECRET,
   });
 
   await app.register(multipart, {
     limits: {
-      fileSize: env.MAX_UPLOAD_SIZE_MB * 1024 * 1024,
+      fileSize:
+        env.MAX_UPLOAD_SIZE_MB *
+        1024 *
+        1024,
       files: 10000,
       parts: 20000,
       fields: 10,
-      fieldSize: 1024 * 1024,
+      fieldSize:
+        1024 * 1024,
     },
   });
 
   app.get("/health", async () => ({
     status: "ok",
-    service: "data-manage-backend",
-    timestamp: new Date().toISOString(),
+    service:
+      "data-manage-backend",
+    timestamp:
+      new Date().toISOString(),
   }));
 
   await registerAuthRoutes(app);
@@ -65,6 +78,7 @@ export async function createApp() {
   await registerUserRoutes(app);
   await registerMetadataRoutes(app);
   await registerDashboardRoutes(app);
+  await registerDatasetRoutes(app);
   await registerUploadRoutes(app);
   await registerDownloadRoutes(app);
 
