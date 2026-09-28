@@ -32,6 +32,10 @@ const links = [
     href: "/dataset",
     label: "Dataset",
   },
+  {
+    href: "/classes",
+    label: "classes",
+  }
 ];
 
 export default function DashboardLayout({
@@ -84,10 +88,6 @@ export default function DashboardLayout({
           <h1 className="font-semibold">
             Data Manage
           </h1>
-
-          <p className="mt-1 text-xs text-muted-foreground">
-            Dataset management
-          </p>
         </div>
 
         <nav className="space-y-1 px-3">

@@ -731,23 +731,7 @@ export default function MetadataPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() =>
-                void loadMetadata()
-              }
-              disabled={loading}
-              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50"
-            >
-              <RefreshCw
-                className={
-                  loading
-                    ? "size-4 animate-spin"
-                    : "size-4"
-                }
-              />
-              Refresh
-            </button>
+            
 
             <button
               type="button"

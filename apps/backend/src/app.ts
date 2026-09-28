@@ -7,6 +7,7 @@ import { env } from "./config/env.js";
 
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerClientRoutes } from "./modules/clients/routes.js";
+import { registerClassRoutes } from "./modules/classes/routes.js";
 import { registerDashboardRoutes } from "./modules/dashboard/routes.js";
 import { registerDownloadRoutes } from "./modules/download/routes.js";
 import { registerMetadataRoutes } from "./modules/metadata/routes.js";
@@ -64,16 +65,20 @@ export async function createApp() {
     },
   });
 
-  app.get("/health", async () => ({
-    status: "ok",
-    service:
-      "data-manage-backend",
-    timestamp:
-      new Date().toISOString(),
-  }));
+  app.get(
+    "/health",
+    async () => ({
+      status: "ok",
+      service:
+        "data-manage-backend",
+      timestamp:
+        new Date().toISOString(),
+    }),
+  );
 
   await registerAuthRoutes(app);
   await registerClientRoutes(app);
+  await registerClassRoutes(app);
   await registerViewRoutes(app);
   await registerUserRoutes(app);
   await registerMetadataRoutes(app);

@@ -532,29 +532,7 @@ export default function DashboardPage() {
             <h1 className="text-3xl font-semibold tracking-tight">
               Dashboard
             </h1>
-
-            <p className="mt-1 text-xs text-muted-foreground">
-              Dataset analytics and
-              annotation intelligence
-            </p>
           </div>
-
-          <button
-            type="button"
-            onClick={() =>
-              window.location.reload()
-            }
-            className="inline-flex h-9 items-center justify-center gap-2 self-start rounded-lg border bg-card px-3 text-sm transition-colors hover:bg-muted lg:self-auto"
-          >
-            <RefreshCw
-              className={
-                loading
-                  ? "size-4 animate-spin"
-                  : "size-4"
-              }
-            />
-            Refresh
-          </button>
         </header>
 
         <section className="rounded-xl border bg-card p-4 shadow-sm">
