@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import {
   useEffect,
-  useMemo,
+  useRef,
   useState,
 } from "react";
 import { api } from "../../../lib/api";
@@ -46,8 +46,14 @@ type SelectedFile = {
 };
 
 type Annotation = {
-  classId?: number;
+  class_name?: string;
   className?: string;
+  center_x?: number;
+  center_y?: number;
+  width?: number;
+  height?: number;
+  class_id?: number;
+  classId?: number;
   geometry?: {
     format?: string;
     values?: number[];
@@ -73,6 +79,15 @@ type NavigationEntry = {
   title: string;
   scope?: Scope;
   path?: string;
+};
+
+type AnnotationBox = {
+  id: string;
+  className: string;
+  centerX: number;
+  centerY: number;
+  width: number;
+  height: number;
 };
 
 function extension(name: string) {
@@ -143,106 +158,442 @@ function getFilePreviewUrl(
   );
 }
 
-function AnnotationImage({
+function normalizeAnnotation(
+  annotation: Annotation,
+  recordId: string,
+  index: number,
+): AnnotationBox | null {
+  const newFormat =
+    typeof annotation.center_x === "number" &&
+    typeof annotation.center_y === "number" &&
+    typeof annotation.width === "number" &&
+    typeof annotation.height === "number";
+
+  if (newFormat) {
+    return {
+      id: `${recordId}-${index}`,
+      className:
+        annotation.class_name ??
+        annotation.className ??
+        String(
+          annotation.class_id ??
+            annotation.classId ??
+            "unknown",
+        ),
+      centerX: annotation.center_x!,
+      centerY: annotation.center_y!,
+      width: annotation.width!,
+      height: annotation.height!,
+    };
+  }
+
+  const values =
+    annotation.geometry?.values;
+
+  if (
+    annotation.geometry?.format ===
+      "yolo_bbox" &&
+    Array.isArray(values) &&
+    values.length >= 5 &&
+    values.every(
+      (value) =>
+        typeof value === "number" &&
+        Number.isFinite(value),
+    )
+  ) {
+    const classId = values[0];
+    const centerX = values[1];
+    const centerY = values[2];
+    const width = values[3];
+    const height = values[4];
+
+    return {
+      id: `${recordId}-${index}`,
+      className:
+        annotation.className ??
+        annotation.class_name ??
+        String(
+          annotation.classId ??
+            annotation.class_id ??
+            classId,
+        ),
+      centerX,
+      centerY,
+      width,
+      height,
+    };
+  }
+
+  return null;
+}
+
+function getAnnotationBoxes(
+  annotations: AnnotationResult[],
+) {
+  return annotations.flatMap(
+    (record) =>
+      record.annotations
+        .map((annotation, index) =>
+          normalizeAnnotation(
+            annotation,
+            record.id,
+            index,
+          ),
+        )
+        .filter(
+          (
+            value,
+          ): value is AnnotationBox =>
+            value !== null,
+        ),
+  );
+}
+
+function AnnotationCanvas({
   imageUrl,
   annotations,
 }: {
   imageUrl: string;
   annotations: AnnotationResult[];
 }) {
-  const boxes = annotations.flatMap(
-    (record) =>
-      record.annotations
-        .filter(
-          (annotation) =>
-            annotation.geometry?.format ===
-            "yolo_bbox",
-        )
-        .map((annotation, index) => {
-          const values =
-            annotation.geometry?.values;
+  const imageRef =
+    useRef<HTMLImageElement | null>(null);
 
-          if (!values || values.length < 5) {
-            return null;
-          }
+  const canvasRef =
+    useRef<HTMLCanvasElement | null>(null);
 
-          const [
-            classId,
-            centerX,
-            centerY,
-            width,
-            height,
-          ] = values;
+  const [
+    imageLoaded,
+    setImageLoaded,
+  ] = useState(false);
 
-          return {
-            id: `${record.id}-${index}`,
-            className:
-              annotation.className ??
-              String(classId),
-            centerX,
-            centerY,
-            width,
-            height,
-          };
-        })
-        .filter(
-          (
-            value,
-          ): value is NonNullable<typeof value> =>
-            value !== null,
-        ),
-  );
+  const boxes =
+    getAnnotationBoxes(annotations);
+
+  useEffect(() => {
+    if (!imageLoaded) {
+      return;
+    }
+
+    const image = imageRef.current;
+    const canvas = canvasRef.current;
+
+    if (!image || !canvas) {
+      return;
+    }
+
+    function draw() {
+      const currentImage =
+        imageRef.current;
+
+      const currentCanvas =
+        canvasRef.current;
+
+      if (
+        !currentImage ||
+        !currentCanvas
+      ) {
+        return;
+      }
+
+      const width =
+        currentImage.clientWidth;
+
+      const height =
+        currentImage.clientHeight;
+
+      if (!width || !height) {
+        return;
+      }
+
+      const dpr =
+        typeof window !== "undefined"
+          ? window.devicePixelRatio || 1
+          : 1;
+
+      currentCanvas.width =
+        Math.round(width * dpr);
+
+      currentCanvas.height =
+        Math.round(height * dpr);
+
+      currentCanvas.style.width =
+        `${width}px`;
+
+      currentCanvas.style.height =
+        `${height}px`;
+
+      const context =
+        currentCanvas.getContext("2d");
+
+      if (!context) {
+        return;
+      }
+
+      context.setTransform(
+        dpr,
+        0,
+        0,
+        dpr,
+        0,
+        0,
+      );
+
+      context.clearRect(
+        0,
+        0,
+        width,
+        height,
+      );
+
+      boxes.forEach((box) => {
+        const x =
+          (box.centerX -
+            box.width / 2) *
+          width;
+
+        const y =
+          (box.centerY -
+            box.height / 2) *
+          height;
+
+        const boxWidth =
+          box.width * width;
+
+        const boxHeight =
+          box.height * height;
+
+        context.lineWidth = 2;
+        context.strokeStyle =
+          "rgba(255, 60, 60, 0.95)";
+
+        context.strokeRect(
+          x,
+          y,
+          boxWidth,
+          boxHeight,
+        );
+
+        const label =
+          box.className;
+
+        context.font =
+          "600 13px sans-serif";
+
+        const metrics =
+          context.measureText(label);
+
+        const labelWidth =
+          metrics.width + 10;
+
+        const labelHeight = 22;
+
+        const labelX =
+          Math.max(
+            0,
+            Math.min(
+              x,
+              width - labelWidth,
+            ),
+          );
+
+        const labelY =
+          Math.max(
+            labelHeight,
+            y,
+          );
+
+        context.fillStyle =
+          "rgba(220, 35, 35, 0.9)";
+
+        context.fillRect(
+          labelX,
+          labelY - labelHeight,
+          labelWidth,
+          labelHeight,
+        );
+
+        context.fillStyle =
+          "#ffffff";
+
+        context.fillText(
+          label,
+          labelX + 5,
+          labelY - 7,
+        );
+      });
+    }
+
+    draw();
+
+    const resizeObserver =
+      typeof ResizeObserver !==
+      "undefined"
+        ? new ResizeObserver(draw)
+        : null;
+
+    if (resizeObserver) {
+      resizeObserver.observe(image);
+    }
+
+    window.addEventListener(
+      "resize",
+      draw,
+    );
+
+    return () => {
+      resizeObserver?.disconnect();
+
+      window.removeEventListener(
+        "resize",
+        draw,
+      );
+    };
+  }, [
+    boxes,
+    imageLoaded,
+  ]);
 
   return (
-    <div className="flex items-center justify-center rounded-xl border bg-muted/20 p-4">
-      <div className="relative inline-block max-w-full">
+    <div className="flex min-h-105 items-center justify-center rounded-xl border bg-black/5 p-4 dark:bg-black/20">
+      <div className="relative inline-block max-w-full overflow-hidden rounded-lg">
         <img
+          ref={imageRef}
           src={imageUrl}
           alt="Annotated image"
-          className="block max-h-[65vh] max-w-full object-contain"
+          className="block max-h-[70vh] max-w-full object-contain"
+          onLoad={() =>
+            setImageLoaded(true)
+          }
         />
 
-        <svg
-          className="pointer-events-none absolute inset-0 h-full w-full"
-          viewBox="0 0 1 1"
-          preserveAspectRatio="none"
-        >
-          {boxes.map((box) => {
-            const x =
-              box.centerX -
-              box.width / 2;
+        <canvas
+          ref={canvasRef}
+          className="pointer-events-none absolute inset-0"
+        />
+      </div>
+    </div>
+  );
+}
 
-            const y =
-              box.centerY -
-              box.height / 2;
+function AnnotationViewer({
+  file,
+  annotations,
+  onClose,
+}: {
+  file: SelectedFile;
+  annotations: AnnotationResult[];
+  onClose: () => void;
+}) {
+  const imageUrl =
+    getFilePreviewUrl(file);
 
-            return (
-              <g key={box.id}>
-                <rect
-                  x={x}
-                  y={y}
-                  width={box.width}
-                  height={box.height}
-                  fill="none"
-                  stroke="red"
-                  strokeWidth="0.003"
-                />
+  const boxes =
+    getAnnotationBoxes(annotations);
 
-                <text
-                  x={Math.max(0, x)}
-                  y={Math.max(0.02, y)}
-                  fill="white"
-                  stroke="black"
-                  strokeWidth="0.0015"
-                  fontSize="0.018"
-                  paintOrder="stroke"
-                >
-                  {box.className}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
+  return (
+    <div className="fixed inset-0 z-60 flex bg-black/70">
+      <div className="m-auto flex max-h-[94vh] w-[96vw] max-w-7xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div className="min-w-0">
+            <p className="truncate font-semibold">
+              Annotation Viewer
+            </p>
+
+            <p className="truncate text-xs text-muted-foreground">
+              {file.name}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 hover:bg-accent"
+          >
+            <X className="size-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-5">
+          <AnnotationCanvas
+            imageUrl={imageUrl}
+            annotations={annotations}
+          />
+
+          <div className="mt-5 rounded-xl border bg-card p-4">
+            <div className="mb-3">
+              <p className="text-sm font-semibold">
+                Annotations
+              </p>
+
+              <p className="text-xs text-muted-foreground">
+                {boxes.length} bounding box
+                {boxes.length === 1
+                  ? ""
+                  : "es"}{" "}
+                detected
+              </p>
+            </div>
+
+            {boxes.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No bounding-box
+                annotations were found.
+              </p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {boxes.map(
+                  (box, index) => (
+                    <div
+                      key={box.id}
+                      className="rounded-lg border bg-muted/20 p-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium">
+                          {box.className}
+                        </span>
+
+                        <span className="text-xs text-muted-foreground">
+                          #{index + 1}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                        <span>
+                          X:{" "}
+                          {box.centerX.toFixed(
+                            4,
+                          )}
+                        </span>
+
+                        <span>
+                          Y:{" "}
+                          {box.centerY.toFixed(
+                            4,
+                          )}
+                        </span>
+
+                        <span>
+                          W:{" "}
+                          {box.width.toFixed(
+                            4,
+                          )}
+                        </span>
+
+                        <span>
+                          H:{" "}
+                          {box.height.toFixed(
+                            4,
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  ),
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -255,23 +606,37 @@ function PreviewPanel({
   file: SelectedFile;
   onClose: () => void;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] =
+    useState("");
+
   const [loading, setLoading] =
     useState(true);
-  const [error, setError] = useState("");
-  const [annotations, setAnnotations] =
-    useState<AnnotationResult[]>([]);
+
+  const [error, setError] =
+    useState("");
+
+  const [
+    annotations,
+    setAnnotations,
+  ] = useState<AnnotationResult[]>(
+    [],
+  );
+
   const [
     annotationLoading,
     setAnnotationLoading,
   ] = useState(false);
+
   const [
     showAnnotation,
     setShowAnnotation,
   ] = useState(false);
 
-  const image = isImage(file.name);
-  const textFile = isText(file.name);
+  const image =
+    isImage(file.name);
+
+  const textFile =
+    isText(file.name);
 
   const fileUrl =
     getFilePreviewUrl(file);
@@ -289,19 +654,22 @@ function PreviewPanel({
         setLoading(true);
         setError("");
 
-        const response = await fetch(
-          fileUrl,
-          {
-            credentials: "include",
-            cache: "no-store",
-          },
-        );
+        const response =
+          await fetch(
+            fileUrl,
+            {
+              credentials: "include",
+              cache: "no-store",
+            },
+          );
 
         if (!response.ok) {
           const body =
             await response
               .json()
-              .catch(() => null);
+              .catch(
+                () => null,
+              );
 
           throw new Error(
             body?.message ??
@@ -335,7 +703,10 @@ function PreviewPanel({
     return () => {
       active = false;
     };
-  }, [fileUrl, textFile]);
+  }, [
+    fileUrl,
+    textFile,
+  ]);
 
   useEffect(() => {
     if (image) {
@@ -359,6 +730,17 @@ function PreviewPanel({
         );
       }
 
+      const hasBoxes =
+        getAnnotationBoxes(
+          result,
+        ).length > 0;
+
+      if (!hasBoxes) {
+        throw new Error(
+          "No bounding-box annotation found.",
+        );
+      }
+
       setAnnotations(result);
       setShowAnnotation(true);
     } catch (value) {
@@ -374,25 +756,28 @@ function PreviewPanel({
 
   async function downloadFile() {
     try {
-      const response = await fetch(
-        `/api/file-download?clientId=${encodeURIComponent(
-          file.clientId,
-        )}&scope=${encodeURIComponent(
-          file.scope,
-        )}&path=${encodeURIComponent(
-          file.path,
-        )}`,
-        {
-          credentials: "include",
-          cache: "no-store",
-        },
-      );
+      const response =
+        await fetch(
+          `/api/file-download?clientId=${encodeURIComponent(
+            file.clientId,
+          )}&scope=${encodeURIComponent(
+            file.scope,
+          )}&path=${encodeURIComponent(
+            file.path,
+          )}`,
+          {
+            credentials: "include",
+            cache: "no-store",
+          },
+        );
 
       if (!response.ok) {
         const body =
           await response
             .json()
-            .catch(() => null);
+            .catch(
+              () => null,
+            );
 
         throw new Error(
           body?.message ??
@@ -407,12 +792,18 @@ function PreviewPanel({
         URL.createObjectURL(blob);
 
       const link =
-        document.createElement("a");
+        document.createElement(
+          "a",
+        );
 
       link.href = url;
-      link.download = file.name;
+      link.download =
+        file.name;
 
-      document.body.appendChild(link);
+      document.body.appendChild(
+        link,
+      );
+
       link.click();
       link.remove();
 
@@ -427,134 +818,119 @@ function PreviewPanel({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex bg-black/50">
-      <div className="ml-auto flex h-full w-full max-w-5xl flex-col bg-background shadow-2xl">
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <div className="min-w-0">
-            <p className="truncate font-semibold">
-              {file.name}
-            </p>
+    <>
+      <div className="fixed inset-0 z-50 flex bg-black/50">
+        <div className="ml-auto flex h-full w-full max-w-5xl flex-col bg-background shadow-2xl">
+          <div className="flex items-center justify-between border-b px-5 py-4">
+            <div className="min-w-0">
+              <p className="truncate font-semibold">
+                {file.name}
+              </p>
 
-            <p className="truncate text-xs text-muted-foreground">
-              {file.scope}/{file.path}
-            </p>
-          </div>
+              <p className="truncate text-xs text-muted-foreground">
+                {file.scope}/{file.path}
+              </p>
+            </div>
 
-          <div className="flex items-center gap-2">
-            {image && (
+            <div className="flex items-center gap-2">
+              {image && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    void loadAnnotation()
+                  }
+                  disabled={
+                    annotationLoading
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
+                >
+                  {annotationLoading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+
+                  View Annotation
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() =>
-                  void loadAnnotation()
+                  void downloadFile()
                 }
-                disabled={annotationLoading}
-                className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-accent"
               >
-                {annotationLoading ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Eye className="size-4" />
-                )}
-                View Annotation
+                <Download className="size-4" />
+                Download
               </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() =>
-                void downloadFile()
-              }
-              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-accent"
-            >
-              <Download className="size-4" />
-              Download
-            </button>
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg p-2 hover:bg-accent"
-            >
-              <X className="size-5" />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-auto p-6">
-          {loading && (
-            <div className="flex h-full items-center justify-center">
-              <Loader2 className="size-6 animate-spin text-muted-foreground" />
-            </div>
-          )}
-
-          {error && !loading && (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-              {error}
-            </div>
-          )}
-
-          {!loading &&
-            !error &&
-            image && (
-              <div className="flex min-h-full items-center justify-center rounded-xl border bg-muted/20 p-4">
-                <img
-                  src={fileUrl}
-                  alt={file.name}
-                  className="max-h-[75vh] max-w-full object-contain"
-                />
-              </div>
-            )}
-
-          {!loading &&
-            !error &&
-            textFile && (
-              <pre className="min-h-full whitespace-pre-wrap wrap-break-words rounded-xl border bg-muted/20 p-5 font-mono text-xs">
-                {text}
-              </pre>
-            )}
-
-          {!loading &&
-            !error &&
-            !image &&
-            !textFile && (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Preview is not available for this file type.
-              </div>
-            )}
-        </div>
-
-        {showAnnotation && (
-          <div className="max-h-[55vh] overflow-auto border-t bg-card p-5">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold">
-                  Annotation Preview
-                </h3>
-
-                <p className="text-xs text-muted-foreground">
-                  Bounding boxes are rendered over the original image.
-                </p>
-              </div>
 
               <button
                 type="button"
-                onClick={() =>
-                  setShowAnnotation(false)
-                }
+                onClick={onClose}
                 className="rounded-lg p-2 hover:bg-accent"
               >
-                <X className="size-4" />
+                <X className="size-5" />
               </button>
             </div>
-
-            <AnnotationImage
-              imageUrl={fileUrl}
-              annotations={annotations}
-            />
           </div>
-        )}
+
+          <div className="flex-1 overflow-auto p-6">
+            {loading && (
+              <div className="flex h-full items-center justify-center">
+                <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {error && !loading && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                {error}
+              </div>
+            )}
+
+            {!loading &&
+              !error &&
+              image && (
+                <div className="flex min-h-full items-center justify-center rounded-xl border bg-muted/20 p-4">
+                  <img
+                    src={fileUrl}
+                    alt={file.name}
+                    className="max-h-[75vh] max-w-full object-contain"
+                  />
+                </div>
+              )}
+
+            {!loading &&
+              !error &&
+              textFile && (
+                <pre className="min-h-full whitespace-pre-wrap wrap-break-word rounded-xl border bg-muted/20 p-5 font-mono text-xs">
+                  {text}
+                </pre>
+              )}
+
+            {!loading &&
+              !error &&
+              !image &&
+              !textFile && (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  Preview is not available
+                  for this file type.
+                </div>
+              )}
+          </div>
+        </div>
       </div>
-    </div>
+
+      {showAnnotation && (
+        <AnnotationViewer
+          file={file}
+          annotations={annotations}
+          onClose={() =>
+            setShowAnnotation(false)
+          }
+        />
+      )}
+    </>
   );
 }
 
@@ -567,7 +943,8 @@ function FileCard({
   onOpen: () => void;
   onDownload: () => void;
 }) {
-  const image = isImage(item.name);
+  const image =
+    isImage(item.name);
 
   return (
     <div className="group rounded-xl border bg-card p-4 transition hover:-translate-y-0.5 hover:shadow-sm">
@@ -622,15 +999,17 @@ function FolderGrid({
     item: TreeItem,
   ) => void;
 }) {
-  const folders = items.filter(
-    (item) =>
-      item.type === "directory",
-  );
+  const folders =
+    items.filter(
+      (item) =>
+        item.type === "directory",
+    );
 
-  const files = items.filter(
-    (item) =>
-      item.type === "file",
-  );
+  const files =
+    items.filter(
+      (item) =>
+        item.type === "file",
+    );
 
   return (
     <div className="p-6">
@@ -641,17 +1020,19 @@ function FolderGrid({
           </h3>
 
           <div className="flex flex-wrap gap-3">
-            {folders.map((item) => (
-              <Folder
-                key={item.path}
-                size={1}
-                color="#70A1FF"
-                label={item.name}
-                onClick={() =>
-                  onFolder(item)
-                }
-              />
-            ))}
+            {folders.map(
+              (item) => (
+                <Folder
+                  key={item.path}
+                  size={1}
+                  color="currentColor"
+                  label={item.name}
+                  onClick={() =>
+                    onFolder(item)
+                  }
+                />
+              ),
+            )}
           </div>
         </div>
       )}
@@ -663,18 +1044,20 @@ function FolderGrid({
           </h3>
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-            {files.map((item) => (
-              <FileCard
-                key={item.path}
-                item={item}
-                onOpen={() =>
-                  onFile(item)
-                }
-                onDownload={() =>
-                  onDownload(item)
-                }
-              />
-            ))}
+            {files.map(
+              (item) => (
+                <FileCard
+                  key={item.path}
+                  item={item}
+                  onOpen={() =>
+                    onFile(item)
+                  }
+                  onDownload={() =>
+                    onDownload(item)
+                  }
+                />
+              ),
+            )}
           </div>
         </div>
       )}
@@ -688,7 +1071,7 @@ function FolderGrid({
   );
 }
 
-export default function DownloadPage() {
+export default function DatasetPage() {
   const {
     user,
     loading: authLoading,
@@ -700,7 +1083,9 @@ export default function DownloadPage() {
   const [
     selectedClient,
     setSelectedClient,
-  ] = useState<Client | null>(null);
+  ] = useState<Client | null>(
+    null,
+  );
 
   const [scope, setScope] =
     useState<Scope | null>(null);
@@ -716,16 +1101,16 @@ export default function DownloadPage() {
   const [
     navigation,
     setNavigation,
-  ] = useState<NavigationEntry[]>(
-    [],
-  );
+  ] = useState<
+    NavigationEntry[]
+  >([]);
 
   const [
     selectedFile,
     setSelectedFile,
-  ] = useState<SelectedFile | null>(
-    null,
-  );
+  ] = useState<
+    SelectedFile | null
+  >(null);
 
   const [loading, setLoading] =
     useState(true);
@@ -760,7 +1145,10 @@ export default function DownloadPage() {
               client.has_raw),
         );
 
-      setClients(visibleClients);
+      setClients(
+        visibleClients,
+      );
+
       setSelectedClient(null);
       setScope(null);
       setCurrentPath("");
@@ -781,7 +1169,10 @@ export default function DownloadPage() {
     if (!authLoading) {
       void loadClients();
     }
-  }, [authLoading, canSeeRaw]);
+  }, [
+    authLoading,
+    canSeeRaw,
+  ]);
 
   async function loadFolder(
     clientId: string,
@@ -809,7 +1200,9 @@ export default function DownloadPage() {
     }
   }
 
-  function openClient(client: Client) {
+  function openClient(
+    client: Client,
+  ) {
     setSelectedClient(client);
     setScope(null);
     setCurrentPath("");
@@ -841,7 +1234,8 @@ export default function DownloadPage() {
 
     setNavigation([
       {
-        title: selectedClient.name,
+        title:
+          selectedClient.name,
       },
       {
         title: nextScope,
@@ -869,14 +1263,16 @@ export default function DownloadPage() {
 
     setCurrentPath(item.path);
 
-    setNavigation((previous) => [
-      ...previous,
-      {
-        title: item.name,
-        scope,
-        path: item.path,
-      },
-    ]);
+    setNavigation(
+      (previous) => [
+        ...previous,
+        {
+          title: item.name,
+          scope,
+          path: item.path,
+        },
+      ],
+    );
 
     await loadFolder(
       selectedClient.id,
@@ -885,7 +1281,9 @@ export default function DownloadPage() {
     );
   }
 
-  function openFile(item: TreeItem) {
+  function openFile(
+    item: TreeItem,
+  ) {
     if (
       !selectedClient ||
       !scope
@@ -894,7 +1292,8 @@ export default function DownloadPage() {
     }
 
     setSelectedFile({
-      clientId: selectedClient.id,
+      clientId:
+        selectedClient.id,
       scope,
       path: item.path,
       name: item.name,
@@ -918,7 +1317,9 @@ export default function DownloadPage() {
     const nextNavigation =
       navigation.slice(0, -1);
 
-    setNavigation(nextNavigation);
+    setNavigation(
+      nextNavigation,
+    );
 
     const previous =
       nextNavigation[
@@ -978,7 +1379,9 @@ export default function DownloadPage() {
         const body =
           await response
             .json()
-            .catch(() => null);
+            .catch(
+              () => null,
+            );
 
         throw new Error(
           body?.message ??
@@ -993,12 +1396,18 @@ export default function DownloadPage() {
         URL.createObjectURL(blob);
 
       const link =
-        document.createElement("a");
+        document.createElement(
+          "a",
+        );
 
       link.href = url;
-      link.download = item.name;
+      link.download =
+        item.name;
 
-      document.body.appendChild(link);
+      document.body.appendChild(
+        link,
+      );
+
       link.click();
       link.remove();
 
@@ -1038,7 +1447,9 @@ export default function DownloadPage() {
         const body =
           await response
             .json()
-            .catch(() => null);
+            .catch(
+              () => null,
+            );
 
         throw new Error(
           body?.message ??
@@ -1053,7 +1464,9 @@ export default function DownloadPage() {
         URL.createObjectURL(blob);
 
       const link =
-        document.createElement("a");
+        document.createElement(
+          "a",
+        );
 
       link.href = url;
 
@@ -1062,7 +1475,10 @@ export default function DownloadPage() {
           ? `${selectedClient.name}-dataset.zip`
           : `${selectedClient.name}-${type}.zip`;
 
-      document.body.appendChild(link);
+      document.body.appendChild(
+        link,
+      );
+
       link.click();
       link.remove();
 
@@ -1077,23 +1493,23 @@ export default function DownloadPage() {
   }
 
   const breadcrumbs =
-    useMemo(
-      () =>
-        navigation.map(
-          (entry) => entry.title,
-        ),
-      [navigation],
+    navigation.map(
+      (entry) => entry.title,
     );
 
   return (
     <main className="min-h-screen p-4 md:p-6">
-      <div className="mx-auto">
+      <div className="w-full">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-semibold">
-              Dataset Management
+            <h1 className="text-xl font-semibold">
+              Dataset
             </h1>
 
+            <p className="mt-1 text-sm text-muted-foreground">
+              Browse and download
+              dataset files.
+            </p>
           </div>
 
           <button
@@ -1102,7 +1518,8 @@ export default function DownloadPage() {
               void loadClients()
             }
             disabled={
-              loading || authLoading
+              loading ||
+              authLoading
             }
             className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
           >
@@ -1113,6 +1530,7 @@ export default function DownloadPage() {
                   : "size-4"
               }
             />
+
             Refresh
           </button>
         </div>
@@ -1126,12 +1544,13 @@ export default function DownloadPage() {
         {!selectedClient ? (
           <section className="rounded-xl border bg-card p-6">
             <div className="mb-6">
-              <h2 className="text-xl font-semibold">
+              <h2 className="text-sm font-semibold">
                 Clients
               </h2>
 
-              <p className="mt-1 text-xl text-muted-foreground">
-                Select a client to browse its data.
+              <p className="mt-1 text-xs text-muted-foreground">
+                Select a client to
+                browse its data.
               </p>
             </div>
 
@@ -1141,22 +1560,27 @@ export default function DownloadPage() {
               </div>
             ) : clients.length === 0 ? (
               <div className="flex min-h-72 items-center justify-center text-sm text-muted-foreground">
-                No clients with data found.
+                No clients with
+                data found.
               </div>
             ) : (
               <div className="flex flex-wrap gap-4">
-                {clients.map((client) => (
-                  <Folder
-                    key={client.id}
-                    size={1.2}
-                    color="#70A1FF"
-                    label={client.name}
-                    description={`${client.metadata_count} metadata files`}
-                    onClick={() =>
-                      openClient(client)
-                    }
-                  />
-                ))}
+                {clients.map(
+                  (client) => (
+                    <Folder
+                      key={client.id}
+                      size={1.2}
+                      color="currentColor"
+                      label={client.name}
+                      description={`${client.metadata_count} metadata files`}
+                      onClick={() =>
+                        openClient(
+                          client,
+                        )
+                      }
+                    />
+                  ),
+                )}
               </div>
             )}
           </section>
@@ -1295,7 +1719,7 @@ export default function DownloadPage() {
                   {selectedClient.has_metadata && (
                     <Folder
                       size={1.2}
-                      color="#70A1FF"
+                      color="currentColor"
                       label="metadata"
                       description="Canonical metadata"
                       onClick={() =>
@@ -1310,7 +1734,7 @@ export default function DownloadPage() {
                     selectedClient.has_raw && (
                       <Folder
                         size={1.2}
-                        color="#70A1FF"
+                        color="currentColor"
                         label="raw"
                         description="Original uploaded data"
                         onClick={() =>

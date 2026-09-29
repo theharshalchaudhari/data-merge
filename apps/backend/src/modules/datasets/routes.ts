@@ -1,15 +1,15 @@
 import type {
   FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
 } from "fastify";
-
 import { z } from "zod";
-
 import {
   requireRole,
 } from "../auth/guard.js";
-
 import {
   createDatasetType,
+  deleteDataset,
   deleteDatasetType,
   getDatasetClassId,
   getDatasetClassMap,
@@ -29,14 +29,12 @@ const createDatasetTypeSchema =
         .trim()
         .min(1)
         .max(100),
-
     description:
       z.string()
         .trim()
         .max(500)
         .nullable()
         .optional(),
-
     classes:
       z.array(
         z.object({
@@ -44,7 +42,6 @@ const createDatasetTypeSchema =
             z.number()
               .int()
               .nonnegative(),
-
           class_name:
             z.string()
               .trim()
@@ -63,7 +60,6 @@ const updateDatasetTypeSchema =
         .min(1)
         .max(100)
         .optional(),
-
     description:
       z.string()
         .trim()
@@ -78,24 +74,20 @@ const uploadQuerySchema =
       z.string()
         .uuid()
         .optional(),
-
     viewId:
       z.string()
         .uuid()
         .optional(),
-
     datasetTypeId:
       z.string()
         .uuid()
         .optional(),
-
     page:
       z.coerce
         .number()
         .int()
         .positive()
         .default(1),
-
     limit:
       z.coerce
         .number()
@@ -103,6 +95,28 @@ const uploadQuerySchema =
         .positive()
         .max(100)
         .default(50),
+  });
+
+const deleteDatasetParamsSchema =
+  z.object({
+    clientId:
+      z.string().uuid(),
+  });
+
+const deleteDatasetSchema =
+  z.object({
+    folderPath:
+      z.string()
+        .trim()
+        .min(1)
+        .max(1000),
+    folderName:
+      z.string()
+        .trim()
+        .min(1)
+        .max(255),
+    confirmation:
+      z.literal("confirm"),
   });
 
 function getRouteId(
@@ -211,11 +225,9 @@ export async function registerDatasetRoutes(
       } catch (error) {
         if (
           error &&
-          typeof error ===
-            "object" &&
+          typeof error === "object" &&
           "code" in error &&
-          error.code ===
-            "23505"
+          error.code === "23505"
         ) {
           return reply
             .code(409)
@@ -335,11 +347,9 @@ export async function registerDatasetRoutes(
       } catch (error) {
         if (
           error &&
-          typeof error ===
-            "object" &&
+          typeof error === "object" &&
           "code" in error &&
-          error.code ===
-            "23505"
+          error.code === "23505"
         ) {
           return reply
             .code(409)
@@ -400,11 +410,9 @@ export async function registerDatasetRoutes(
       } catch (error) {
         if (
           error &&
-          typeof error ===
-            "object" &&
+          typeof error === "object" &&
           "code" in error &&
-          error.code ===
-            "23503"
+          error.code === "23503"
         ) {
           return reply
             .code(409)
@@ -607,7 +615,9 @@ export async function registerDatasetRoutes(
           "viewer",
         ),
     },
-    async (request) => {
+    async (
+      request,
+    ) => {
       const query =
         uploadQuerySchema.parse(
           request.query,
@@ -645,6 +655,143 @@ export async function registerDatasetRoutes(
               query.limit,
           ),
       };
+    },
+  );
+
+  app.delete(
+    "/api/datasets/:clientId/folder",
+    {
+      preHandler:
+        requireRole(
+          "admin",
+          "editor",
+        ),
+    },
+    async (
+      request,
+      reply,
+    ) => {
+      const params =
+        deleteDatasetParamsSchema.safeParse(
+          request.params,
+        );
+
+      if (!params.success) {
+        return reply
+          .code(400)
+          .send({
+            message:
+              "Invalid client ID.",
+            errors:
+              params.error.flatten(),
+          });
+      }
+
+      const body =
+        deleteDatasetSchema.safeParse(
+          request.body,
+        );
+
+      if (!body.success) {
+        return reply
+          .code(400)
+          .send({
+            message:
+              "Dataset deletion requires the exact folder name and confirmation.",
+            errors:
+              body.error.flatten(),
+          });
+      }
+
+      if (
+        body.data.folderName !==
+        body.data.folderPath
+          .split(/[\\/]/)
+          .filter(Boolean)
+          .at(-1)
+      ) {
+        return reply
+          .code(400)
+          .send({
+            message:
+              "Folder name does not match the selected dataset folder.",
+          });
+      }
+
+      try {
+        const result =
+          await deleteDataset({
+            clientId:
+              params.data.clientId,
+            folderPath:
+              body.data.folderPath,
+            folderName:
+              body.data.folderName,
+            confirmation:
+              body.data.confirmation,
+          });
+
+        if (!result) {
+          return reply
+            .code(404)
+            .send({
+              message:
+                "Dataset folder not found.",
+            });
+        }
+
+        return {
+          success: true,
+          message:
+            "Dataset deleted successfully.",
+          deleted:
+            result,
+        };
+      } catch (error) {
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error
+        ) {
+          const code =
+            String(error.code);
+
+          if (code === "DATASET_NOT_FOUND") {
+            return reply
+              .code(404)
+              .send({
+                message:
+                  "Dataset folder not found.",
+              });
+          }
+
+          if (
+            code ===
+            "DATASET_FOLDER_MISMATCH"
+          ) {
+            return reply
+              .code(400)
+              .send({
+                message:
+                  "The selected folder does not match the dataset record.",
+              });
+          }
+
+          if (
+            code ===
+            "DATASET_DELETE_FAILED"
+          ) {
+            return reply
+              .code(500)
+              .send({
+                message:
+                  "Dataset could not be completely deleted.",
+              });
+          }
+        }
+
+        throw error;
+      }
     },
   );
 }

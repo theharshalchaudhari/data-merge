@@ -1,5 +1,12 @@
-import { db } from "../../db/client.js";
+import fs from "node:fs/promises";
+import path from "node:path";
 
+import { db } from "../../db/client.js";
+import {
+  getMetadataImagePath,
+  getMetadataLabelPath,
+  getRawClientPath,
+} from "../../storage/paths.js";
 import type {
   CreateDatasetTypeInput,
   DatasetClass,
@@ -8,7 +15,9 @@ import type {
   UpdateDatasetTypeInput,
 } from "./types.js";
 
-export async function getDatasetTypes(): Promise<DatasetType[]> {
+export async function getDatasetTypes(): Promise<
+  DatasetType[]
+> {
   const types =
     await db.query<{
       id: string;
@@ -63,14 +72,12 @@ export async function getDatasetTypes(): Promise<DatasetType[]> {
     );
   }
 
-  return types.rows.map(
-    (type) => ({
-      ...type,
-      classes:
-        classesByType.get(type.id) ??
-        [],
-    }),
-  );
+  return types.rows.map((type) => ({
+    ...type,
+    classes:
+      classesByType.get(type.id) ??
+      [],
+  }));
 }
 
 export async function getDatasetType(
@@ -167,7 +174,8 @@ export async function createDatasetType(
       );
     }
 
-    const classes: DatasetClass[] = [];
+    const classes: DatasetClass[] =
+      [];
 
     for (const item of input.classes) {
       const classResult =
@@ -201,9 +209,7 @@ export async function createDatasetType(
         );
       }
 
-      classes.push(
-        createdClass,
-      );
+      classes.push(createdClass);
     }
 
     await client.query(
@@ -318,12 +324,10 @@ export async function getDatasetClassMap(
     );
 
   return new Map(
-    result.rows.map(
-      (item) => [
-        item.class_id,
-        item.class_name,
-      ],
-    ),
+    result.rows.map((item) => [
+      item.class_id,
+      item.class_name,
+    ]),
   );
 }
 
@@ -366,7 +370,9 @@ export async function getDatasetUploads(
   items: DatasetUpload[];
   total: number;
 }> {
-  const conditions: string[] = [];
+  const conditions: string[] =
+    [];
+
   const values: unknown[] = [];
 
   function add(
@@ -454,7 +460,8 @@ export async function getDatasetUploads(
         INNER JOIN dataset_types dt
           ON dt.id = du.dataset_type_id
         ${where}
-        ORDER BY du.created_at DESC
+        ORDER BY
+          du.created_at DESC
         LIMIT $${values.length + 1}
         OFFSET $${values.length + 2}
       `,
@@ -470,4 +477,500 @@ export async function getDatasetUploads(
     total:
       count.rows[0]?.total ?? 0,
   };
+}
+
+export async function deleteDataset(
+  input: {
+    clientId: string;
+    folderPath: string;
+    folderName: string;
+    confirmation: "confirm";
+  },
+): Promise<{
+  clientId: string;
+  folderName: string;
+  deletedRaw: boolean;
+  deletedMetadataFiles: number;
+  deletedMetadataRows: number;
+  deletedUploadRows: number;
+}> {
+  if (
+    input.confirmation !== "confirm"
+  ) {
+    const error =
+      new Error(
+        "Dataset deletion requires confirmation.",
+      );
+
+    Object.assign(error, {
+      code: "DATASET_DELETE_FAILED",
+    });
+
+    throw error;
+  }
+
+  const clientResult =
+    await db.query<{
+      id: string;
+      name: string;
+    }>(
+      `
+        SELECT
+          id,
+          name
+        FROM clients
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [input.clientId],
+    );
+
+  const client =
+    clientResult.rows[0];
+
+  if (!client) {
+    const error =
+      new Error(
+        "Client not found.",
+      );
+
+    Object.assign(error, {
+      code: "CLIENT_NOT_FOUND",
+    });
+
+    throw error;
+  }
+
+  const folderName =
+    input.folderName.trim();
+
+  const folderPath =
+    input.folderPath
+      .replaceAll("\\", "/")
+      .replace(/^\/+/, "")
+      .replace(/\/+$/, "");
+
+  if (!folderName) {
+    const error =
+      new Error(
+        "Dataset folder name is required.",
+      );
+
+    Object.assign(error, {
+      code:
+        "DATASET_FOLDER_MISMATCH",
+    });
+
+    throw error;
+  }
+
+  if (!folderPath) {
+    const error =
+      new Error(
+        "Dataset folder path is required.",
+      );
+
+    Object.assign(error, {
+      code:
+        "DATASET_FOLDER_MISMATCH",
+    });
+
+    throw error;
+  }
+
+  const pathParts =
+    folderPath
+      .split("/")
+      .filter(Boolean);
+
+  if (
+    pathParts.length === 0 ||
+    pathParts[pathParts.length - 1] !==
+      folderName
+  ) {
+    const error =
+      new Error(
+        "Dataset folder path and folder name do not match.",
+      );
+
+    Object.assign(error, {
+      code:
+        "DATASET_FOLDER_MISMATCH",
+    });
+
+    throw error;
+  }
+
+  if (
+    pathParts.some(
+      (part) =>
+        part === "." ||
+        part === "..",
+    )
+  ) {
+    const error =
+      new Error(
+        "Invalid dataset folder path.",
+      );
+
+    Object.assign(error, {
+      code:
+        "DATASET_FOLDER_MISMATCH",
+    });
+
+    throw error;
+  }
+
+  const uploadResult =
+    await db.query<{
+      id: string;
+      folder_name: string;
+      raw_folder_path: string;
+    }>(
+      `
+        SELECT
+          id,
+          folder_name,
+          raw_folder_path
+        FROM dataset_uploads
+        WHERE client_id = $1
+          AND folder_name = $2
+        ORDER BY created_at DESC
+      `,
+      [
+        input.clientId,
+        folderName,
+      ],
+    );
+
+  const matchingUpload =
+    uploadResult.rows.find(
+      (upload) => {
+        const rawPath =
+          upload.raw_folder_path
+            .replaceAll("\\", "/")
+            .replace(/^\/+/, "")
+            .replace(/\/+$/, "");
+
+        return (
+          rawPath === folderPath ||
+          rawPath.endsWith(
+            `/${folderPath}`,
+          ) ||
+          rawPath === folderName
+        );
+      },
+    );
+
+  if (!matchingUpload) {
+    const error =
+      new Error(
+        "Dataset folder was not found for this client.",
+      );
+
+    Object.assign(error, {
+      code: "DATASET_NOT_FOUND",
+    });
+
+    throw error;
+  }
+
+  const rawClientPath =
+    getRawClientPath(
+      client.name,
+    );
+
+  const rawClientResolved =
+    path.resolve(
+      rawClientPath,
+    );
+
+  const rawDatasetPath =
+    path.resolve(
+      rawClientResolved,
+      ...pathParts,
+    );
+
+  const relativeRawPath =
+    path.relative(
+      rawClientResolved,
+      rawDatasetPath,
+    );
+
+  if (
+    !relativeRawPath ||
+    relativeRawPath.startsWith("..") ||
+    path.isAbsolute(
+      relativeRawPath,
+    )
+  ) {
+    const error =
+      new Error(
+        "Invalid dataset folder path.",
+      );
+
+    Object.assign(error, {
+      code:
+        "DATASET_FOLDER_MISMATCH",
+    });
+
+    throw error;
+  }
+
+  const metadataResult =
+    await db.query<{
+      id: string;
+      name: string;
+      root_folders:
+        | string[]
+        | null;
+      original_root_folders:
+        | string[]
+        | null;
+      source_locations:
+        | string[]
+        | null;
+    }>(
+      `
+        SELECT
+          id,
+          name,
+          root_folders,
+          original_root_folders,
+          source_locations
+        FROM metadata
+        WHERE client_id = $1
+          AND $2 = ANY(root_folders)
+      `,
+      [
+        input.clientId,
+        folderName,
+      ],
+    );
+
+  let deletedMetadataFiles =
+    0;
+
+  let deletedMetadataRows =
+    0;
+
+  const dbClient =
+    await db.connect();
+
+  try {
+    await dbClient.query(
+      "BEGIN",
+    );
+
+    for (
+      const metadata of
+        metadataResult.rows
+    ) {
+      const remainingRoots =
+        (
+          metadata.root_folders ??
+          []
+        ).filter(
+          (root) =>
+            root !== folderName,
+        );
+
+      const remainingOriginalRoots =
+        (
+          metadata.original_root_folders ??
+          []
+        ).filter(
+          (root) =>
+            root !== folderName,
+        );
+
+      const remainingSources =
+        (
+          metadata.source_locations ??
+          []
+        ).filter(
+          (source) => {
+            const normalized =
+              source.replaceAll(
+                "\\",
+                "/",
+              );
+
+            return (
+              normalized !==
+                folderName &&
+              !normalized.startsWith(
+                `${folderName}/`,
+              )
+            );
+          },
+        );
+
+      if (
+        remainingRoots.length === 0
+      ) {
+        await dbClient.query(
+          `
+            DELETE FROM metadata
+            WHERE id = $1
+          `,
+          [metadata.id],
+        );
+
+        deletedMetadataRows++;
+
+        continue;
+      }
+
+      await dbClient.query(
+        `
+          UPDATE metadata
+          SET
+            root_folders = $1::text[],
+            original_root_folders = $2::text[],
+            source_locations = $3::text[]
+          WHERE id = $4
+        `,
+        [
+          remainingRoots,
+          remainingOriginalRoots,
+          remainingSources,
+          metadata.id,
+        ],
+      );
+    }
+
+    const uploadDelete =
+      await dbClient.query(
+        `
+          DELETE FROM dataset_uploads
+          WHERE client_id = $1
+            AND folder_name = $2
+        `,
+        [
+          input.clientId,
+          folderName,
+        ],
+      );
+
+    await dbClient.query(
+      "COMMIT",
+    );
+
+    try {
+      await fs.rm(
+        rawDatasetPath,
+        {
+          recursive: true,
+          force: false,
+        },
+      );
+    } catch (error) {
+      const value =
+        error as {
+          code?: string;
+        };
+
+      if (
+        value.code !== "ENOENT"
+      ) {
+        throw error;
+      }
+    }
+
+    for (
+      const metadata of
+        metadataResult.rows
+    ) {
+      const remainingRoots =
+        (
+          metadata.root_folders ??
+          []
+        ).filter(
+          (root) =>
+            root !== folderName,
+        );
+
+      if (
+        remainingRoots.length > 0
+      ) {
+        continue;
+      }
+
+      const imagePath =
+        getMetadataImagePath(
+          client.name,
+          metadata.name,
+        );
+
+      const labelPath =
+        getMetadataLabelPath(
+          client.name,
+          metadata.name,
+        );
+
+      try {
+        await fs.unlink(
+          imagePath,
+        );
+
+        deletedMetadataFiles++;
+      } catch (error) {
+        const value =
+          error as {
+            code?: string;
+          };
+
+        if (
+          value.code !== "ENOENT"
+        ) {
+          throw error;
+        }
+      }
+
+      try {
+        await fs.unlink(
+          labelPath,
+        );
+
+        deletedMetadataFiles++;
+      } catch (error) {
+        const value =
+          error as {
+            code?: string;
+          };
+
+        if (
+          value.code !== "ENOENT"
+        ) {
+          throw error;
+        }
+      }
+    }
+
+    return {
+      clientId:
+        input.clientId,
+      folderName,
+      deletedRaw: true,
+      deletedMetadataFiles,
+      deletedMetadataRows,
+      deletedUploadRows:
+        uploadDelete.rowCount ?? 0,
+    };
+  } catch (error) {
+    try {
+      await dbClient.query(
+        "ROLLBACK",
+      );
+    } catch {
+      return Promise.reject(
+        error,
+      );
+    }
+
+    throw error;
+  } finally {
+    dbClient.release();
+  }
 }

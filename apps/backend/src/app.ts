@@ -2,9 +2,7 @@ import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
-
 import { env } from "./config/env.js";
-
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerClientRoutes } from "./modules/clients/routes.js";
 import { registerClassRoutes } from "./modules/classes/routes.js";
@@ -26,10 +24,7 @@ export async function createApp() {
   });
 
   await app.register(cors, {
-    origin: [
-      "http://localhost:3000",
-      "http://127.0.0.1:3000",
-    ],
+    origin: true,
     credentials: true,
     methods: [
       "GET",

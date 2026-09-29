@@ -2,51 +2,49 @@
 
 import {
   FormEvent,
-  useState
+  useState,
 } from "react";
-
 import {
-  useRouter
+  useRouter,
+  useSearchParams,
 } from "next/navigation";
-
 import Link from "next/link";
-
-import {
-  api
-} from "../../../lib/api";
+import { api } from "../../../lib/api";
 
 export default function LoginPage() {
-  const router =
-    useRouter();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const [
-    username,
-    setUsername
-  ] =
+  const [username, setUsername] =
     useState("");
-
-  const [
-    password,
-    setPassword
-  ] =
+  const [password, setPassword] =
     useState("");
-
-  const [
-    error,
-    setError
-  ] =
+  const [error, setError] =
     useState("");
-
-  const [
-    loading,
-    setLoading
-  ] =
+  const [loading, setLoading] =
     useState(false);
 
   async function submit(
-    event: FormEvent
+    event: FormEvent<HTMLFormElement>,
   ) {
     event.preventDefault();
+
+    if (loading) {
+      return;
+    }
+
+    const trimmedUsername =
+      username.trim();
+
+    if (!trimmedUsername) {
+      setError("Username is required.");
+      return;
+    }
+
+    if (!password) {
+      setError("Password is required.");
+      return;
+    }
 
     setError("");
     setLoading(true);
@@ -55,32 +53,38 @@ export default function LoginPage() {
       await api(
         "/api/auth/login",
         {
-          method:
-            "POST",
-
-          body:
-            JSON.stringify({
-              username,
-              password
-            })
-        }
+          method: "POST",
+          body: JSON.stringify({
+            username: trimmedUsername,
+            password,
+          }),
+        },
       );
 
-      router.push(
-        "/dashboard"
+      await api(
+        "/api/auth/me",
       );
 
-      router.refresh();
+      const next =
+        searchParams.get("next");
+
+      const destination =
+        next &&
+        next.startsWith("/") &&
+        !next.startsWith("//")
+          ? next
+          : "/dashboard";
+
+      window.location.replace(
+        destination,
+      );
     } catch (value) {
       setError(
         value instanceof Error
           ? value.message
-          : "Login failed."
+          : "Login failed.",
       );
-    } finally {
-      setLoading(
-        false
-      );
+      setLoading(false);
     }
   }
 
@@ -101,49 +105,62 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium">
+          <label
+            htmlFor="username"
+            className="text-sm font-medium"
+          >
             Username
           </label>
 
           <input
+            id="username"
+            name="username"
+            type="text"
+            autoComplete="username"
             className="w-full rounded-lg border bg-background px-3 py-2 outline-none focus:ring-2 focus:ring-ring"
             value={username}
             onChange={(event) =>
-              setUsername(
-                event.target.value
-              )
+              setUsername(event.target.value)
             }
-            required
+            disabled={loading}
           />
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium">
+          <label
+            htmlFor="password"
+            className="text-sm font-medium"
+          >
             Password
           </label>
 
           <input
+            id="password"
+            name="password"
             type="password"
+            autoComplete="current-password"
             className="w-full rounded-lg border bg-background px-3 py-2 outline-none focus:ring-2 focus:ring-ring"
             value={password}
             onChange={(event) =>
-              setPassword(
-                event.target.value
-              )
+              setPassword(event.target.value)
             }
-            required
+            disabled={loading}
           />
         </div>
 
         {error && (
-          <p className="text-sm text-destructive">
+          <p
+            role="alert"
+            className="text-sm text-destructive"
+          >
             {error}
           </p>
         )}
 
         <button
-          disabled={loading}
-          className="w-full rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:opacity-50"
+          type="submit"
+          disabled={Boolean(loading)}
+          className="w-full rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading
             ? "Signing in..."

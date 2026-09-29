@@ -1,14 +1,7 @@
 import crypto from "node:crypto";
-
 import bcrypt from "bcrypt";
-
-import {
-  db
-} from "../../db/client.js";
-
-import {
-  env
-} from "../../config/env.js";
+import { db } from "../../db/client.js";
+import { env } from "../../config/env.js";
 
 export type AuthRole =
   | "admin"
@@ -24,9 +17,7 @@ export interface AuthUser {
   role: AuthRole;
 }
 
-function hashToken(
-  token: string
-): string {
+function hashToken(token: string): string {
   return crypto
     .createHash("sha256")
     .update(token)
@@ -39,12 +30,12 @@ export async function createUser(
     username: string;
     email: string;
     password: string;
-  }
+  },
 ) {
   const passwordHash =
     await bcrypt.hash(
       input.password,
-      12
+      12,
     );
 
   const result =
@@ -72,8 +63,8 @@ export async function createUser(
         input.name,
         input.username,
         input.email,
-        passwordHash
-      ]
+        passwordHash,
+      ],
     );
 
   return result.rows[0];
@@ -81,7 +72,7 @@ export async function createUser(
 
 export async function authenticate(
   username: string,
-  password: string
+  password: string,
 ): Promise<AuthUser | null> {
   const result =
     await db.query(
@@ -96,7 +87,7 @@ export async function authenticate(
       FROM users
       WHERE username = $1
       `,
-      [username]
+      [username],
     );
 
   const user =
@@ -109,7 +100,7 @@ export async function authenticate(
   const valid =
     await bcrypt.compare(
       password,
-      user.password_hash
+      user.password_hash,
     );
 
   if (!valid) {
@@ -121,15 +112,16 @@ export async function authenticate(
     name: user.name,
     username: user.username,
     email: user.email,
-    role: user.role
+    role: user.role,
   };
 }
 
 export async function createSession(
-  userId: string
+  userId: string,
 ): Promise<string> {
   const token =
-    crypto.randomBytes(48)
+    crypto
+      .randomBytes(48)
       .toString("hex");
 
   await db.query(
@@ -149,15 +141,15 @@ export async function createSession(
     `,
     [
       userId,
-      hashToken(token)
-    ]
+      hashToken(token),
+    ],
   );
 
   return token;
 }
 
 export async function getSessionUser(
-  token: string
+  token: string,
 ): Promise<AuthUser | null> {
   const result =
     await db.query(
@@ -175,7 +167,7 @@ export async function getSessionUser(
         s.token_hash = $1
         AND s.expires_at > NOW()
       `,
-      [hashToken(token)]
+      [hashToken(token)],
     );
 
   return (
@@ -185,23 +177,21 @@ export async function getSessionUser(
 }
 
 export async function deleteSession(
-  token: string
+  token: string,
 ): Promise<void> {
   await db.query(
     `
     DELETE FROM sessions
     WHERE token_hash = $1
     `,
-    [hashToken(token)]
+    [hashToken(token)],
   );
 }
 
 export const sessionCookieOptions = {
   httpOnly: true,
   sameSite: "lax" as const,
-  secure:
-    env.NODE_ENV ===
-    "production",
+  secure: env.SESSION_COOKIE_SECURE,
   path: "/",
-  maxAge: 60 * 60 * 8
+  maxAge: 60 * 60 * 8,
 };

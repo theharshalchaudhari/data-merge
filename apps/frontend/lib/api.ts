@@ -1,11 +1,17 @@
 const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+  process.env.NEXT_PUBLIC_API_URL ||
+  (
+    typeof window !== "undefined"
+      ? `${window.location.protocol}//${window.location.hostname}:4000`
+      : "http://localhost:4000"
+  );
 
 export async function api<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
   const hasBody = options.body != null;
+
   const isFormData =
     typeof FormData !== "undefined" &&
     options.body instanceof FormData;
@@ -15,24 +21,40 @@ export async function api<T>(
   if (isFormData) {
     headers.delete("Content-Type");
   } else if (hasBody) {
-    headers.set("Content-Type", "application/json");
+    headers.set(
+      "Content-Type",
+      "application/json"
+    );
   } else {
     headers.delete("Content-Type");
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    credentials: "include",
-    headers,
-    cache: "no-store"
-  });
+  const response = await fetch(
+    `${API_URL}${path}`,
+    {
+      ...options,
+      credentials: "include",
+      headers,
+      cache: "no-store",
+    }
+  );
 
-  const contentType = response.headers.get("content-type");
-  const text = await response.text();
+  const contentType =
+    response.headers.get(
+      "content-type"
+    );
+
+  const text =
+    await response.text();
 
   let body: unknown = text;
 
-  if (text && contentType?.includes("application/json")) {
+  if (
+    text &&
+    contentType?.includes(
+      "application/json"
+    )
+  ) {
     try {
       body = JSON.parse(text);
     } catch {
@@ -46,16 +68,25 @@ export async function api<T>(
       body !== null &&
       "message" in body
         ? String(
-            (body as { message: unknown }).message
+            (
+              body as {
+                message: unknown;
+              }
+            ).message
           )
-        : typeof body === "string" && body.trim()
+        : typeof body === "string" &&
+          body.trim()
           ? body
           : "Request failed.";
 
     throw new Error(message);
   }
 
-  return (text ? body : undefined) as T;
+  return (
+    text
+      ? body
+      : undefined
+  ) as T;
 }
 
 export { API_URL };
