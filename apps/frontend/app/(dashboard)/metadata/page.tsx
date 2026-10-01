@@ -1115,7 +1115,7 @@ export default function MetadataPage() {
                           </span>
                         </td>
 
-                        <td className="w-[10%] px-4 text-center py-3  break-words">
+                        <td className="w-[10%] px-4 text-center py-3 wrap-break-words">
                           {row.className}
                         </td>
 

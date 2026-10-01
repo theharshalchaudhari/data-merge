@@ -10,9 +10,29 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Data-Merge",
-  description: "data management tool for merging and annotating datasets",
+  title: "CMS Data-Merge",
+  description:
+    "data management tool for merging and annotating datasets",
 };
+
+const themeScript = `
+(function () {
+  try {
+    var stored = localStorage.getItem("theme");
+    var theme =
+      stored === "light" || stored === "dark"
+        ? stored
+        : window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+
+    document.documentElement.classList.toggle(
+      "dark",
+      theme === "dark"
+    );
+  } catch (_) {}
+})();
+`;
 
 export default function RootLayout({
   children,
@@ -20,9 +40,23 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${nunito.variable} h-full antialiased`}>
-      <body className="bg-background min-h-full flex flex-col font-sans">
-        <TooltipProvider delayDuration={200}>{children}</TooltipProvider>
+    <html
+      lang="en"
+      className={`${nunito.variable} h-full antialiased`}
+      suppressHydrationWarning
+    >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: themeScript,
+          }}
+        />
+      </head>
+
+      <body className="min-h-full flex flex-col bg-background font-sans">
+        <TooltipProvider delayDuration={200}>
+          {children}
+        </TooltipProvider>
       </body>
     </html>
   );

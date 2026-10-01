@@ -1015,7 +1015,7 @@ export default function FloatingUpload() {
           }
         >
           <div
-            className="fixed bottom-24 right-6 w-[460px] overflow-hidden rounded-2xl border bg-card shadow-2xl"
+            className="fixed bottom-24 right-6 w-115 overflow-hidden rounded-2xl border bg-card shadow-2xl"
             onClick={(event) =>
               event.stopPropagation()
             }
@@ -1090,7 +1090,7 @@ export default function FloatingUpload() {
       )}
 
       {modalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/70 p-4 backdrop-blur-md">
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-background/70 p-4 backdrop-blur-md">
           <div className="w-full max-w-4xl overflow-hidden rounded-2xl border bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b px-6 py-5">
               <div className="min-w-0">

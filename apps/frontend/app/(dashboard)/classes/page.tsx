@@ -602,7 +602,7 @@ export default function ClassesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[600px] text-sm">
+              <table className="w-full min-w-150 text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs text-muted-foreground">
                     <th className="w-28 px-5 py-3 font-medium">
@@ -762,7 +762,7 @@ export default function ClassesPage() {
                           No classes found.
                         </div>
                       ) : (
-                        <table className="w-full min-w-[700px] text-sm">
+                        <table className="w-full min-w-175 text-sm">
                           <thead>
                             <tr className="border-b text-left text-xs text-muted-foreground">
                               <th className="w-28 px-5 py-3 font-medium">
